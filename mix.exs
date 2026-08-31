@@ -82,7 +82,9 @@ defmodule Lmml.MixProject do
       canonical: "https://hexdocs.pm/lmml",
       skip_undefined_reference_warnings_on: ["CHANGELOG.md"],
       groups_for_modules: groups_for_modules(),
-      nest_modules_by_prefix: []
+      nest_modules_by_prefix: [
+        Lmml.Narrative
+      ]
     ]
   end
 
@@ -121,8 +123,20 @@ defmodule Lmml.MixProject do
 
   defp groups_for_modules do
     [
-      "Core Components": [
-        Ragex
+      Core: [
+        Lmml,
+        Lmml.Bundle,
+        Lmml.Embed,
+        Lmml.Pack
+      ],
+      Content: [
+        Lmml.Document,
+        Lmml.Manifest,
+        Lmml.Narrative.Parser,
+        Lmml.Narrative.Reference,
+        Lmml.Narrative.Renderer,
+        Lmml.Narrative.Resolver,
+        Lmml.Narrative.Syntax
       ]
     ]
   end
