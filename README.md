@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/Oeditus/lmml/v0.1.0/stuff/img/logo-128.png" alt="Lmml" width="128" align="right">
+<img src="https://raw.githubusercontent.com/Oeditus/lmml/v0.1.0/stuff/img/logo-128.png" alt="lmml" width="128" align="right">
 
-# Lmml
+# `lmml`
 
 [![CI](https://github.com/Oeditus/lmml/actions/workflows/ci.yml/badge.svg)](https://github.com/Oeditus/lmml/actions/workflows/ci.yml)
 [![Hex.pm](https://img.shields.io/hexpm/v/lmml.svg)](https://hex.pm/packages/lmml)
@@ -52,7 +52,7 @@ Add `lmml` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:lmml, "~> 0.1.0"}
+    {:lmml, "~> 0.1"}
   ]
 end
 ```
@@ -101,6 +101,8 @@ Full API and syntax documentation can be generated locally with
 ```sh
 mix docs
 ```
+
+or at [hexdocs](https://lmml.hexdocs.pm).
 
 See [`docs/LANGUAGE_REFERENCE.md`](docs/LANGUAGE_REFERENCE.md) for the
 complete language reference, including several non-obvious findings

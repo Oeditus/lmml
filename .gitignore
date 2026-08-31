@@ -25,3 +25,15 @@ lmml-*.tar
 # Dialyzer PLT cache.
 /priv/plts/
 
+/.elixir-tools/
+/.elixir_ls/
+/.erl.history/
+
+/dllb.redb
+/dllb.redb.search/
+
+/priv/parsers/haskell/.stack-work/
+
+/.ragex
+/.dsh
+

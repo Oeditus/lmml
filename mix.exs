@@ -80,7 +80,9 @@ defmodule Lmml.MixProject do
       formatters: ["html", "epub"],
       authors: ["Oeditus Team"],
       canonical: "https://hexdocs.pm/lmml",
-      skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
+      skip_undefined_reference_warnings_on: ["CHANGELOG.md"],
+      groups_for_modules: groups_for_modules(),
+      nest_modules_by_prefix: []
     ]
   end
 
@@ -109,11 +111,19 @@ defmodule Lmml.MixProject do
     [
       # >= 0.12.2 for the Syntax.merge/2 :settings fix and the block
       # `escape:` property lmml relies on -- see Lmml.Narrative.Syntax.
-      {:md, "~> 0.12.2"},
+      {:md, "~> 0.12"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:excoveralls, "~> 0.18", only: :test, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+    ]
+  end
+
+  defp groups_for_modules do
+    [
+      "Core Components": [
+        Ragex
+      ]
     ]
   end
 end
