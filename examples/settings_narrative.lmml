@@ -1,0 +1,24 @@
+# Project context
+
+This is a bare, self-contained `.lmml` narrative -- plain text, openable
+and editable anywhere, with no external files to lose track of. It is
+also perfectly valid Markdown, so any generic Markdown viewer renders it
+sensibly even without knowing about `lmml` at all.
+
+The project's settings are carried directly in the narrative, as an
+inline embed:
+
+@@@settings.yaml
+model: gpt-5
+temperature: 0.2
+tools:
+  - read_files
+  - run_shell_command
+@@@
+
+Since the embed's content lives right here in the text (rather than
+being a `@name.ext` reference into a `.lmmlz` archive), this file needs
+nothing else to be fully self-contained. See
+`Lmml.Bundle.new_text/2`/`Lmml.Bundle.open/1` to load a narrative like
+this one, and `Lmml.Manifest.load/1` if it also carried an optional
+`manifest.json` embed.
