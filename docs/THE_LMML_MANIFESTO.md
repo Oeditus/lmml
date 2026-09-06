@@ -62,15 +62,15 @@ LMML acts as the **universal orchestrator**. You control the execution semantics
 
 ---
 
-## Strict Conformance to RFC 0001 (Point ④)
+## Strict Conformance to RFC (Point ④)
 
 We didn't just write a handy library—we established a rigorous specification.
 
-LMML is fully backed by **[RFC 0001: Language Model Markup Language & Archive Specification](RFC_LMML_FORMAT.md)**. 
+LMML is fully backed by **[RFC: Language Model Markup Language & Archive Specification](RFC_LMML_FORMAT.md)**. 
 
 ### Why RFC Conformance Matters for Enterprise & Production AI:
-- **Rock-Solid Security**: RFC 0001 mandates up-front zip central-directory inspection (`:zip.table/1`) before any archive extraction, immunizing your production systems against path-traversal attacks (`../../etc/passwd`).
-- **Vendor-Agnostic Interoperability**: Whether you are using Elixir, Python, Rust, or TypeScript, any implementation adhering to RFC 0001 parses and validates LMML bundles identically.
+- **Rock-Solid Security**: RFC mandates up-front zip central-directory inspection (`:zip.table/1`) before any archive extraction, immunizing your production systems against path-traversal attacks (`../../etc/passwd`).
+- **Vendor-Agnostic Interoperability**: Whether you are using Elixir, Python, Rust, or TypeScript, any implementation adhering to RFC parses and validates LMML bundles identically.
 - **Deterministic Quality Gates**: Clean, specification-defined issue categories (`missing_reference`, `orphaned_entry`, `conflicting_embed`, `malformed_embed_name`) make `mix lmml.validate` the ultimate CI gate for AI prompt pipelines.
 
 ---
@@ -87,5 +87,5 @@ messages = Lmml.render_turns(resolved)
 ```
 
 👉 Check out the [Language Reference](LANGUAGE_REFERENCE.md)  
-👉 Read the formal [RFC 0001 Specification](RFC_LMML_FORMAT.md)  
+👉 Read the formal [RFC Specification](RFC_LMML_FORMAT.md)  
 👉 Start building with `hex.pm/packages/lmml`!
