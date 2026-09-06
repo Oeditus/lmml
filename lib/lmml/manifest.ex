@@ -65,6 +65,14 @@ defmodule Lmml.Manifest do
   @spec get(t(), String.t()) :: term() | nil
   def get(%__MODULE__{data: data}, key) when is_binary(key), do: Map.get(data, key)
 
+  @doc """
+  Fetches a top-level key from the manifest's decoded data, distinguishing a
+  missing key (`:error`) from one whose value is explicitly `null`
+  (`{:ok, nil}`). `get/2` cannot tell these apart; `fetch/2` can.
+  """
+  @spec fetch(t(), String.t()) :: {:ok, term()} | :error
+  def fetch(%__MODULE__{data: data}, key) when is_binary(key), do: Map.fetch(data, key)
+
   defp decode(content) do
     case :json.decode(content) do
       data when is_map(data) -> {:ok, %__MODULE__{data: data}}

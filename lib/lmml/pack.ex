@@ -77,18 +77,26 @@ defmodule Lmml.Pack do
   a lossy re-creation. A reference that isn't resolvable in the source
   bundle (a dangling `@name.ext` in a bare `.lmml`) is left dangling in
   the result too, since there is nothing to carry forward for it.
+
+  Fails with `{:error, {:conflicting_embed, name}}` when the same embed
+  name appears both inline (`@@@name ... @@@`) *and* as an external
+  reference (`@name`) in the source bundle: externalizing the inline
+  copy would produce two `@name` references meaning different things,
+  colliding on a single zip entry. Rename one side before packing.
   """
   @spec pack(Bundle.t(), String.t() | nil) :: {:ok, Bundle.t()} | {:error, term()}
   def pack(%Bundle{} = bundle, name \\ nil) do
-    inline_embeds =
-      bundle |> Bundle.embeds() |> Enum.filter(&Embed.inline?/1) |> Enum.uniq_by(& &1.name)
+    with :ok <- guard_name_collisions(bundle) do
+      inline_embeds =
+        bundle |> Bundle.embeds() |> Enum.filter(&Embed.inline?/1) |> Enum.uniq_by(& &1.name)
 
-    narrative =
-      Enum.reduce(inline_embeds, Bundle.narrative(bundle), fn embed, text ->
-        String.replace(text, fence_text(embed), "@" <> embed.name)
-      end)
+      narrative =
+        Enum.reduce(inline_embeds, Bundle.narrative(bundle), fn embed, text ->
+          String.replace(text, fence_text(embed), "@" <> embed.name)
+        end)
 
-    Bundle.new_zip(name || Bundle.name(bundle), narrative, collect_entries(bundle))
+      Bundle.new_zip(name || Bundle.name(bundle), narrative, collect_entries(bundle))
+    end
   end
 
   @doc "Same as `pack/2`, but raises on failure."
@@ -136,6 +144,33 @@ defmodule Lmml.Pack do
 
   defp fence_text(%Embed{name: name, content: {:inline, content}}) do
     "@@@" <> name <> "\n" <> content <> "@@@"
+  end
+
+  # Packing externalizes every *inline* embed into a real zip entry named
+  # after the embed. If the same bundle already carries an *external*
+  # reference with that same name (an `@a.txt` pointing at an existing zip
+  # entry) alongside an inline `@@@a.txt ... @@@`, the two would collide on
+  # one `a.txt` entry after the rewrite -- the narrative would end up with
+  # two `@a.txt` references meaning different things, and `collect_entries/1`
+  # would silently let whichever came first win. Rather than drop one side's
+  # content, fail loudly: this is an authoring ambiguity the caller must
+  # resolve (rename one of the embeds) before packing.
+  defp guard_name_collisions(bundle) do
+    embeds = Bundle.embeds(bundle)
+
+    inline_names =
+      embeds |> Enum.filter(&Embed.inline?/1) |> Enum.map(& &1.name) |> MapSet.new()
+
+    case Enum.find(embeds, &(Embed.external?(&1) and MapSet.member?(inline_names, &1.name))) do
+      nil ->
+        case Enum.find(Bundle.entries(bundle), &MapSet.member?(inline_names, &1)) do
+          nil -> :ok
+          entry_name -> {:error, {:conflicting_embed, entry_name}}
+        end
+
+      %Embed{name: name} ->
+        {:error, {:conflicting_embed, name}}
+    end
   end
 
   defp collect_entries(bundle) do
@@ -208,10 +243,37 @@ defmodule Lmml.Pack do
         {:prose, text} -> drop_reference_sigils(text, resolved)
       end)
 
-    case appended_blocks(resolved) do
+    # The substitution phase above (drop_reference_sigils) must run over
+    # `resolved` in descending-name-length order so a short reference name
+    # is never matched as a prefix of a longer one -- but the *appended*
+    # blocks are a separate concern and read best (and match the rest of
+    # the library's contract) in the references' original narrative order.
+    ordered = narrative_order(resolved, bundle)
+
+    case appended_blocks(ordered) do
       "" -> body
       blocks -> body <> "\n\n" <> blocks
     end
+  end
+
+  # Reorders the `{name, content}` pairs of `resolved` (currently in the
+  # substitution-safe descending-length order `resolve_external/1` produced)
+  # into the narrative's own first-occurrence order, so appended `@@@...@@@`
+  # blocks read in the order their references first appeared.
+  defp narrative_order(resolved, bundle) do
+    by_name = Map.new(resolved)
+
+    bundle
+    |> Bundle.embeds()
+    |> Enum.filter(&Embed.external?/1)
+    |> Enum.uniq_by(& &1.name)
+    |> Enum.map(& &1.name)
+    |> Enum.flat_map(fn name ->
+      case Map.fetch(by_name, name) do
+        {:ok, content} -> [{name, content}]
+        :error -> []
+      end
+    end)
   end
 
   defp split_on_fence(text, fence) do
@@ -229,19 +291,27 @@ defmodule Lmml.Pack do
   # Turns a reference occurrence back into plain, non-magic text (its
   # actual content is supplied instead via `appended_blocks/1`, since a
   # fence can't safely be opened at this position -- see the moduledoc).
+  #
+  # The lookahead only excludes a following word character (`\w`), so a
+  # reference at end-of-sentence before ordinary punctuation -- `@report.pdf.`,
+  # `@a.txt)`, `@b.txt,` -- is still de-sigiled to `report.pdf.` etc. Prefix
+  # safety (never de-sigiling a shorter name that is merely a prefix of a
+  # longer, unrelated token such as `@a.png` inside `@a.png.bak`) is *not*
+  # the lookahead's job here: `resolved` is processed in descending-name-length
+  # order, so every longer name has already been de-sigiled by the time a
+  # shorter one runs, leaving no `@` prefix in front of it to misfire on.
   defp drop_reference_sigils(text, resolved) do
     Enum.reduce(resolved, text, fn {name, _content}, acc ->
-      pattern = ~r/@#{Regex.escape(name)}(?![\w.\/-])/u
+      pattern = ~r/@#{Regex.escape(name)}(?!\w)/u
       Regex.replace(pattern, acc, fn _whole -> name end)
     end)
   end
 
   # One proper, blank-line-separated `@@@name ... @@@` block per resolved
-  # reference, in the same (substitution-safe, descending-name-length)
-  # order they were resolved in -- not necessarily their original
-  # narrative order.
-  defp appended_blocks(resolved) do
-    Enum.map_join(resolved, "\n\n", fn {name, content} ->
+  # reference, in the narrative's first-occurrence order (see
+  # `narrative_order/2`).
+  defp appended_blocks(ordered) do
+    Enum.map_join(ordered, "\n\n", fn {name, content} ->
       "@@@" <> name <> "\n" <> content <> "@@@"
     end)
   end

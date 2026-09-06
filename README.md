@@ -45,6 +45,11 @@ temperature: 0.2
 archive's entries); `@@@settings.yaml ... @@@` is an inline embed
 (carried directly in the text). Everything else is ordinary Markdown.
 
+## Requirements
+
+- Erlang/OTP 27+ (uses built-in `:json` module)
+- Elixir ~> 1.20
+
 ## Installation
 
 Add `lmml` to your list of dependencies in `mix.exs`:
@@ -60,9 +65,9 @@ end
 ## Usage
 
 ```elixir
-{:ok, bundle} = Lmml.Bundle.open("convo.lmmlz")
-{:ok, resolved} = Lmml.Narrative.Resolver.resolve(bundle)
-content_parts = Lmml.Narrative.Renderer.render(resolved)
+{:ok, bundle} = Lmml.open("convo.lmmlz")
+{:ok, resolved} = Lmml.resolve(bundle)
+content_parts = Lmml.render(resolved)
 ```
 
 `content_parts` is a list of `%{"type" => ...}` maps ready to hand to a
@@ -70,14 +75,21 @@ multimodal chat completion API's `content` field (`"text"`,
 `"image_url"`, or `"attachment"` parts) -- see
 `Lmml.Narrative.Renderer`.
 
+To split a multi-turn conversation into API-ready role messages:
+
+```elixir
+messages = Lmml.render_turns(resolved)
+# => [%{role: :user, content: [...]}, %{role: :assistant, content: [...]}]
+```
+
 To build a bundle programmatically:
 
 ```elixir
-{:ok, bundle} = Lmml.Bundle.new_zip("convo", "See @a.png.", %{"a.png" => image_bytes})
+{:ok, bundle} = Lmml.new_zip("convo", "See @a.png.", %{"a.png" => image_bytes})
 :ok = Lmml.Bundle.write!(bundle, "convo.lmmlz")
 ```
 
-See the `examples/` directory in the repository for two complete worked
+See the `examples/` directory in the repository for complete worked
 examples: a settings-only bare `.lmml` narrative, and a multi-turn
 conversation with an embedded image packed as `.lmmlz`, resolved and
 rendered end to end.
@@ -89,6 +101,10 @@ rendered end to end.
   real zip entry, producing a `.lmmlz` archive.
 - `mix lmml.inline SOURCE [DEST]` -- inlines every external reference
   back into a bare `.lmml` text file.
+- `mix lmml.render SOURCE [--json] [--max-embed-bytes BYTES]` -- renders a
+  bundle into typed LLM content parts.
+- `mix lmml.to_md SOURCE [DEST]` -- exports a bundle into standard, human-readable
+  Markdown with text placeholders.
 - `mix lmml.validate SOURCE` -- cross-checks a bundle's references,
   entries, and embed names, failing (non-zero exit) if any issue is
   found; suitable as a CI check.

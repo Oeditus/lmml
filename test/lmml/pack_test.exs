@@ -65,6 +65,43 @@ defmodule Lmml.PackTest do
       assert {:error, {:unsafe_entry, "../evil.txt"}} = Pack.pack(bundle)
     end
 
+    test "fails when the same name is both inline and an external reference, rather than silently dropping one side" do
+      # `a.txt` is an inline embed AND an external reference into the zip's
+      # own entry -- externalizing the inline copy would leave two `@a.txt`
+      # references meaning different things, colliding on one entry.
+      {:ok, bundle} =
+        Bundle.new_zip(
+          "convo",
+          "@a.txt then:\n\n@@@a.txt\ninline copy\n@@@",
+          %{"a.txt" => "external bytes"}
+        )
+
+      assert {:error, {:conflicting_embed, "a.txt"}} = Pack.pack(bundle)
+    end
+
+    test "does not flag an inline embed whose name merely resembles, but does not equal, an external reference" do
+      {:ok, bundle} =
+        Bundle.new_zip(
+          "convo",
+          "@a.txt.bak then:\n\n@@@a.txt\ninline copy\n@@@",
+          %{"a.txt.bak" => "external bytes"}
+        )
+
+      assert {:ok, packed} = Pack.pack(bundle)
+      assert Bundle.entries(packed) |> Enum.sort() == ["a.txt", "a.txt.bak"]
+    end
+
+    test "fails when an inline embed name collides with an existing zip entry even if unreferenced in narrative" do
+      {:ok, bundle} =
+        Bundle.new_zip(
+          "convo",
+          "No references, just inline:\n\n@@@a.txt\ninline content\n@@@",
+          %{"a.txt" => "existing entry content"}
+        )
+
+      assert {:error, {:conflicting_embed, "a.txt"}} = Pack.pack(bundle)
+    end
+
     test "multiple distinct inline embeds are all externalized" do
       {:ok, bundle} = Bundle.new_text("foo", "@@@a.txt\n1\n@@@\n\n@@@b.txt\n2\n@@@")
 
@@ -99,6 +136,36 @@ defmodule Lmml.PackTest do
       assert {:ok, "hello"} = Bundle.embed(inlined, "notes.txt")
     end
 
+    test "de-sigils a reference at end-of-sentence before ordinary punctuation" do
+      # A reference immediately before a period, closing paren, or comma is
+      # ordinary prose punctuation (the parser already excludes it from the
+      # reference's name), so inlining must leave it as plain text rather
+      # than a dangling `@ref`.
+      {:ok, bundle} =
+        Bundle.new_zip("convo", "See @report.pdf. And (@a.txt) plus @b.txt,", %{
+          "report.pdf" => "r",
+          "a.txt" => "a",
+          "b.txt" => "b"
+        })
+
+      assert {:ok, inlined} = Pack.inline(bundle)
+      assert Bundle.text?(inlined)
+
+      narrative = Bundle.narrative(inlined)
+      [prose | _blocks] = String.split(narrative, "\n\n@@@")
+
+      assert prose =~ "See report.pdf."
+      assert prose =~ "And (a.txt)"
+      assert prose =~ "plus b.txt,"
+      refute prose =~ "@report.pdf"
+      refute prose =~ "@a.txt"
+      refute prose =~ "@b.txt"
+
+      assert narrative =~ "@@@report.pdf\nr@@@"
+      assert narrative =~ "@@@a.txt\na@@@"
+      assert narrative =~ "@@@b.txt\nb@@@"
+    end
+
     test "leaves an already-inline embed exactly as it is" do
       {:ok, bundle} = Bundle.new_text("foo", "@@@a.txt\nhello\n@@@")
 
@@ -129,10 +196,27 @@ defmodule Lmml.PackTest do
       {:ok, inlined} = Pack.inline(bundle)
 
       assert Bundle.narrative(inlined) ==
-               "See a.png and a.png.bak too.\n\n@@@a.png.bak\nlong@@@\n\n@@@a.png\nshort@@@"
+               "See a.png and a.png.bak too.\n\n@@@a.png\nshort@@@\n\n@@@a.png.bak\nlong@@@"
 
       assert {:ok, "short"} = Bundle.embed(inlined, "a.png")
       assert {:ok, "long"} = Bundle.embed(inlined, "a.png.bak")
+    end
+
+    test "appends the inlined blocks in the references' first-occurrence order" do
+      # Even though `b.txt` is a longer name than `a.txt` (and so is
+      # substituted first for prefix-safety), the appended `@@@...@@@`
+      # blocks must read in the order the references first appear in the
+      # narrative -- `a.txt` (mentioned first) before `b.txt`.
+      {:ok, bundle} =
+        Bundle.new_zip("convo", "See @a.txt and @b.txt", %{
+          "a.txt" => "A",
+          "b.txt" => "B"
+        })
+
+      {:ok, inlined} = Pack.inline(bundle)
+
+      assert Bundle.narrative(inlined) ==
+               "See a.txt and b.txt\n\n@@@a.txt\nA@@@\n\n@@@b.txt\nB@@@"
     end
 
     test "defaults the resulting bundle's name to the source bundle's own name" do

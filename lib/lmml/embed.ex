@@ -56,4 +56,24 @@ defmodule Lmml.Embed do
   @doc "True when the embed's content must be resolved against an external (zip) entry."
   @spec external?(t()) :: boolean()
   def external?(%__MODULE__{} = embed), do: not inline?(embed)
+
+  @doc """
+  The embed's actual content, unwrapped from its `content/0` tuple:
+  the inline binary for an inline embed, or the zip entry name an external
+  embed resolves against.
+
+  This is a convenience accessor so callers need not `case` over the
+  `{:inline, binary} | {:external, String.t()}` tuple at every site.
+  """
+  @spec content(t()) :: binary()
+  def content(%__MODULE__{content: {:inline, content}}), do: content
+  def content(%__MODULE__{content: {:external, entry_name}}), do: entry_name
+
+  @doc """
+  The zip entry name an external embed resolves against, or `nil` for an
+  inline embed (whose bytes travel with the narrative itself).
+  """
+  @spec entry_name(t()) :: String.t() | nil
+  def entry_name(%__MODULE__{content: {:external, entry_name}}), do: entry_name
+  def entry_name(%__MODULE__{content: {:inline, _}}), do: nil
 end

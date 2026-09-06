@@ -39,4 +39,21 @@ defmodule Lmml.EmbedTest do
       assert Embed.external?(embed)
     end
   end
+
+  describe "content/1 and entry_name/1" do
+    test "content/1 returns the inline binary for an inline embed" do
+      assert Embed.content(Embed.inline("a.txt", "hello")) == "hello"
+    end
+
+    test "content/1 returns the zip entry name for an external embed" do
+      assert Embed.content(Embed.external("a.png")) == "a.png"
+      assert Embed.content(Embed.external("logo", "assets/logo.png")) == "assets/logo.png"
+    end
+
+    test "entry_name/1 is the external entry name, or nil for an inline embed" do
+      assert Embed.entry_name(Embed.external("a.png")) == "a.png"
+      assert Embed.entry_name(Embed.external("logo", "assets/logo.png")) == "assets/logo.png"
+      assert Embed.entry_name(Embed.inline("a.txt", "hello")) == nil
+    end
+  end
 end

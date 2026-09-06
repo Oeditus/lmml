@@ -54,6 +54,13 @@ defmodule Lmml.Narrative.ResolverTest do
                Resolver.resolve(bundle)
     end
 
+    test "fails on the first unresolvable embed in narrative order when multiple are unresolvable" do
+      {:ok, bundle} = Bundle.new_text("foo", "First @missing1.png then @missing2.png")
+
+      assert {:error, {"missing1.png", {:unresolvable_reference, "missing1.png"}}} =
+               Resolver.resolve(bundle)
+    end
+
     test "a bundle with no embeds at all resolves to an empty embeds list" do
       {:ok, bundle} = Bundle.new_text("foo", "Just plain prose.")
       assert {:ok, %Resolver{embeds: []}} = Resolver.resolve(bundle)

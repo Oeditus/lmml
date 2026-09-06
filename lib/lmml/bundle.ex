@@ -81,7 +81,8 @@ defmodule Lmml.Bundle do
   end
 
   defp open_zip(name, content) do
-    with {:ok, raw_entries} <- unzip(content),
+    with :ok <- validate_zip_table(content),
+         {:ok, raw_entries} <- unzip(content),
          :ok <- validate_entry_names(Map.keys(raw_entries)),
          {:ok, narrative} <- fetch_narrative(raw_entries, name),
          {:ok, document} <- Document.parse(narrative) do
@@ -97,6 +98,34 @@ defmodule Lmml.Bundle do
        }}
     end
   end
+
+  # Inspects the archive's central-directory entry names *before* any
+  # in-memory extraction happens, so a hostile archive that tries to
+  # escape the bundle root (an absolute path, a `..` segment, or a
+  # backslash) is rejected with a clean `{:error, {:unsafe_entry, ...}}`
+  # rather than being silently sanitized down to a bare basename by
+  # `:zip.unzip/2` (which does collapse such names, but only with a
+  # side-channel warning log the caller never sees). This is the same
+  # defense `validate_entry_names/1` provides for entries that never go
+  # through `:zip` at all (see `new_zip/3`); here it runs against the
+  # archive's own table *before* extraction.
+  defp validate_zip_table(content) do
+    case :zip.table(content) do
+      {:ok, table} ->
+        names = table |> Enum.map(&entry_name/1) |> Enum.reject(&is_nil/1)
+        validate_entry_names(names)
+
+      {:error, reason} ->
+        {:error, {:invalid_zip, reason}}
+    end
+  end
+
+  # `:zip.table/1` returns a list whose elements are `{:zip_file, name,
+  # info, comment, offset, csize}` tuples (one per entry) plus a leading
+  # `{:zip_comment, comment}` tuple. We keep only the real file entries and
+  # take each one's filename (element 2).
+  defp entry_name({:zip_file, name, _info, _comment, _offset, _csize}), do: to_string(name)
+  defp entry_name(_non_file_entry), do: nil
 
   defp unzip(content) do
     case :zip.unzip(content, [:memory]) do

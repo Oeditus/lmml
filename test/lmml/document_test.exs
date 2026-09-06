@@ -60,6 +60,11 @@ defmodule Lmml.DocumentTest do
       assert document.embeds == [Embed.inline("data.json", json <> "\n")]
       assert document.ast == [{:lmml_embed, %{name: "data.json"}, [json <> "\n"]}]
     end
+
+    test "returns an error tuple for invalid UTF-8 input rather than raising" do
+      invalid_utf8 = <<0xFF, 0xFE, 0xFD>>
+      assert {:error, _reason} = Document.parse(invalid_utf8)
+    end
   end
 
   describe "embed/2" do

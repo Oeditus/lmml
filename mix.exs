@@ -1,7 +1,7 @@
 defmodule Lmml.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/Oeditus/lmml"
   @homepage_url "https://oeditus.com"
 
@@ -50,13 +50,13 @@ defmodule Lmml.MixProject do
   defp description do
     "A Markdown-superset markup language for structuring LLM conversations, " <>
       "with a self-contained text form (.lmml) and a zip-archive form (.lmmlz) " <>
-      "for carrying referenced files alongside the narrative."
+      "for carrying referenced files alongside the narrative. Requires Erlang/OTP 27+."
   end
 
   defp package do
     [
       name: "lmml",
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(lib docs .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
       licenses: ["MIT"],
       maintainers: ["Oeditus Team"],
       links: %{
@@ -91,6 +91,8 @@ defmodule Lmml.MixProject do
   defp extras do
     [
       "README.md",
+      "docs/THE_LMML_MANIFESTO.md": [title: "Why LMML?"],
+      "docs/RFC_LMML_FORMAT.md": [title: "RFC 0001 Specification"],
       "docs/LANGUAGE_REFERENCE.md": [title: "Language Reference"],
       LICENSE: [title: "License"],
       "CHANGELOG.md": [title: "Changelog"]
@@ -127,16 +129,26 @@ defmodule Lmml.MixProject do
         Lmml,
         Lmml.Bundle,
         Lmml.Embed,
-        Lmml.Pack
+        Lmml.Pack,
+        Lmml.Settings,
+        Lmml.Manifest
       ],
       Content: [
         Lmml.Document,
-        Lmml.Manifest,
         Lmml.Narrative.Parser,
         Lmml.Narrative.Reference,
         Lmml.Narrative.Renderer,
         Lmml.Narrative.Resolver,
+        Lmml.Narrative.Segment,
         Lmml.Narrative.Syntax
+      ],
+      "Mix Tasks": [
+        Mix.Tasks.Lmml.Inline,
+        Mix.Tasks.Lmml.New,
+        Mix.Tasks.Lmml.Pack,
+        Mix.Tasks.Lmml.Render,
+        Mix.Tasks.Lmml.ToMd,
+        Mix.Tasks.Lmml.Validate
       ]
     ]
   end

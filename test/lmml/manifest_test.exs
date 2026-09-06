@@ -21,6 +21,17 @@ defmodule Lmml.ManifestTest do
       assert Manifest.get(manifest, "assets") == ["a.png"]
       assert Manifest.get(manifest, "missing") == nil
     end
+
+    test "fetch/2 distinguishes a missing key from an explicit null value" do
+      {:ok, bundle} =
+        Bundle.new_text("foo", "@@@manifest.json\n{\"schema\": 1, \"note\": null}\n@@@")
+
+      {:ok, manifest} = Manifest.load(bundle)
+
+      assert Manifest.fetch(manifest, "schema") == {:ok, 1}
+      assert Manifest.fetch(manifest, "note") == {:ok, :null}
+      assert Manifest.fetch(manifest, "missing") == :error
+    end
   end
 
   describe "load/1 with an external manifest.json reference" do

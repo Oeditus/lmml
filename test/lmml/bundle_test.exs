@@ -70,24 +70,21 @@ defmodule Lmml.BundleTest do
       assert {:error, {:missing_narrative_entry, "broken.lmml"}} = Bundle.open(path)
     end
 
-    test "a path-traversal entry never actually escapes the bundle, even though open/1 does not error",
-         %{dir: dir} do
+    test "a path-traversal entry is rejected up front, before any extraction", %{dir: dir} do
       path = Path.join(dir, "evil.lmmlz")
       build_zip!(path, "evil.lmml", "text", %{"../../etc/passwd" => "nope"})
 
-      # Empirically, Erlang's own `:zip.unzip/2` does not reject a
-      # traversal entry outright -- it logs a warning and silently
-      # collapses it to its basename ("../../etc/passwd" -> "passwd")
-      # before `Lmml.Bundle` ever sees the entries map. So `open/1`
-      # succeeds here, but the dangerous path component is already gone:
-      # there is no entry literally named with a `..` segment or an
-      # absolute path to reject in the first place. `validate_entry_names/1`
-      # remains valuable as defense-in-depth for the in-memory `new_zip/3`
-      # construction path (see the test below), which never goes through
-      # `:zip` and so never gets this OTP-level sanitization for free.
-      assert {:ok, bundle} = Bundle.open(path)
-      assert Bundle.entries(bundle) == ["passwd"]
-      assert :ok = Bundle.validate_entry_names(Bundle.entries(bundle))
+      # `open/1` inspects the archive's central-directory table *before*
+      # extracting anything (see `Lmml.Bundle`'s `validate_zip_table/1`), so
+      # a traversal entry is rejected with a clean error rather than being
+      # silently collapsed to a bare basename by `:zip.unzip/2` (which would
+      # otherwise log a side-channel warning the caller never sees).
+      #
+      # Note: an *absolute* path (leading `/`) can't reach this check through
+      # a normally-created archive -- OTP's own `:zip.create` rewrites such a
+      # name to a bare relative path at write time -- so only the `..`
+      # traversal form is the realistic hostile input here.
+      assert {:error, {:unsafe_entry, "../../etc/passwd"}} = Bundle.open(path)
     end
   end
 
@@ -190,6 +187,66 @@ defmodule Lmml.BundleTest do
       assert {:error, issues} = Bundle.validate(bundle)
       assert {:missing_reference, "missing.png"} in issues
       assert {:orphaned_entry, "orphan.png"} in issues
+    end
+
+    test "reports all four kinds of issues at once when present in a single bundle" do
+      {:ok, bundle} =
+        Bundle.new_zip(
+          "convo",
+          "See @missing.png and @../secret.txt.\n\n@@@a.txt\n1\n@@@\n\n@@@a.txt\n2\n@@@",
+          %{"orphan.png" => "bytes"}
+        )
+
+      assert {:error, issues} = Bundle.validate(bundle)
+      assert {:missing_reference, "missing.png"} in issues
+      assert {:orphaned_entry, "orphan.png"} in issues
+      assert {:malformed_embed_name, "../secret.txt"} in issues
+      assert {:conflicting_embed, "a.txt"} in issues
+
+      kinds = issues |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+      assert MapSet.size(kinds) == 4
+    end
+  end
+
+  describe "end-to-end .lmmlz disk round-trip across pack/inline and resolution" do
+    test "writes .lmmlz to disk, reopens, resolves, renders, inlines, and re-parses cleanly", %{
+      dir: dir
+    } do
+      path = Path.join(dir, "story.lmmlz")
+      doc_data = "Document content\n"
+      config_data = "theme: dark\n"
+
+      {:ok, initial} =
+        Bundle.new_zip(
+          "story",
+          "An illustration: @doc.txt\n\n@@@config.yaml\ntheme: dark\n@@@",
+          %{"doc.txt" => doc_data}
+        )
+
+      assert :ok = Bundle.write!(initial, path)
+      assert {:ok, opened} = Bundle.open(path)
+
+      assert {:ok, resolved} = Lmml.resolve(opened)
+      parts = Lmml.render(resolved)
+      assert length(parts) == 3
+
+      assert {:ok, packed} = Lmml.Pack.pack(opened)
+      assert Bundle.zip?(packed)
+      assert Map.has_key?(packed.entries, "config.yaml")
+
+      assert {:ok, inlined} = Lmml.Pack.inline(packed)
+      assert Bundle.text?(inlined)
+      assert {:ok, ^doc_data} = Bundle.embed(inlined, "doc.txt")
+      assert {:ok, ^config_data} = Bundle.embed(inlined, "config.yaml")
+
+      inlined_path = Path.join(dir, "story_inlined.lmml")
+      assert :ok = Bundle.write!(inlined, inlined_path)
+      assert {:ok, reopened_inlined} = Bundle.open(inlined_path)
+      assert {:ok, resolved_inlined} = Lmml.resolve(reopened_inlined)
+      inlined_rendered = Lmml.render(resolved_inlined)
+
+      assert length(inlined_rendered) == 3
+      assert Enum.drop(inlined_rendered, 1) == Enum.drop(parts, 1)
     end
   end
 

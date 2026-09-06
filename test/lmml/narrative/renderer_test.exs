@@ -71,5 +71,62 @@ defmodule Lmml.Narrative.RendererTest do
       assert Renderer.mime_type("a.xyz") == "application/octet-stream"
       refute Renderer.image?("a.xyz")
     end
+
+    test "recognizes the expanded document/audio/video/code extension set" do
+      assert Renderer.mime_type("a.pdf") == "application/pdf"
+      assert Renderer.mime_type("a.csv") == "text/csv"
+      assert Renderer.mime_type("a.log") == "text/plain"
+      assert Renderer.mime_type("a.diff") == "text/x-diff"
+      assert Renderer.mime_type("a.mp3") == "audio/mpeg"
+      assert Renderer.mime_type("a.mp4") == "video/mp4"
+      assert Renderer.mime_type("a.svg") == "image/svg+xml"
+      assert Renderer.image?("a.svg")
+      refute Renderer.image?("a.pdf")
+    end
+  end
+
+  describe "render/2 with :max_embed_bytes" do
+    test "drops embeds whose content exceeds the per-embed byte budget" do
+      {:ok, bundle} =
+        Bundle.new_zip("convo", "@big.txt and @small.txt", %{
+          "big.txt" => String.duplicate("x", 100),
+          "small.txt" => "tiny"
+        })
+
+      {:ok, resolved} = Resolver.resolve(bundle)
+
+      parts = Renderer.render(resolved, max_embed_bytes: 50)
+
+      assert [
+               %{"type" => "text"},
+               %{"type" => "attachment", "name" => "small.txt"}
+             ] = parts
+    end
+
+    test "with no limit, render/2 keeps every embed (same as render/1)" do
+      {:ok, bundle} = Bundle.new_zip("convo", "@a.txt", %{"a.txt" => "hello"})
+      {:ok, resolved} = Resolver.resolve(bundle)
+
+      assert Renderer.render(resolved, []) == Renderer.render(resolved)
+    end
+  end
+
+  describe "total_embed_bytes/1" do
+    test "sums the resolved content of every embed, not the narrative" do
+      {:ok, bundle} =
+        Bundle.new_zip("convo", "a long narrative @a.txt and @b.txt", %{
+          "a.txt" => "12345",
+          "b.txt" => "678"
+        })
+
+      {:ok, resolved} = Resolver.resolve(bundle)
+      assert Renderer.total_embed_bytes(resolved) == 8
+    end
+
+    test "is 0 for a narrative with no embeds" do
+      {:ok, bundle} = Bundle.new_text("foo", "just prose")
+      {:ok, resolved} = Resolver.resolve(bundle)
+      assert Renderer.total_embed_bytes(resolved) == 0
+    end
   end
 end

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Top-level façade** (`Lmml`) -- Added convenience delegators (`Lmml.open/1`, `open!/1`, `resolve/1`, `resolve!/1`, `render/2`, `to_md/2`, `validate/1`, `pack/2`, `pack!/2`, `inline/2`, `inline!/2`, `segment/2`, `render_turns/2`, `settings/2`, `manifest/1`, `embeds/1`, `narrative/1`).
+- **Turn-level / multi-message segmentation** (`Lmml.Narrative.Segment`) -- Splits a narrative into role-labeled messages (`:user`, `:assistant`, `:system`, `:tool`, `:context`), assigning embeds to their respective turns and mapping to API message structures.
+- **Typed project settings** (`Lmml.Settings`) -- Structured helper for loading `settings.yaml` / `settings.json` embeds, featuring a built-in YAML-subset parser.
+- **`Manifest.fetch/2` and `Settings.fetch/2`** -- Exposes key fetching distinguishing missing keys (`:error`) from explicit `null` values (`{:ok, nil}`).
+- **Embed helper accessors** (`Lmml.Embed.content/1`, `Lmml.Embed.entry_name/1`).
+- **CLI Mix Tasks** -- Added `mix lmml.render SOURCE` for rendering LLM-ready content parts (with optional `--json` and `--max-embed-bytes`), and `mix lmml.to_md SOURCE [DEST]` for lossy-but-readable Markdown export.
+- **Markdown export tooling** (`Lmml.to_md/2`, `Lmml.Narrative.Renderer.to_md/2`) -- Converts embed syntax into clean human-readable placeholders (`[Image: name]`, `[Attachment: name]`).
+- **MIME & budget controls** -- Expanded MIME coverage (audio, video, diff, pdf, csv, log, svg) and added per-embed payload budgeting via `max_embed_bytes` in `Renderer.render/2`.
+
+### Fixed & Hardened
+
+- **Pack name collisions** (`Lmml.Pack.pack/2`) -- Added defensive check rejecting inline embed names that collide with external references or existing zip entries, preventing silent data loss.
+- **Stable inlining order** (`Lmml.Pack.inline/2`) -- Appends inlined `@@@name ... @@@` blocks in first-occurrence narrative order while maintaining prefix-safe substitution.
+- **Archive path traversal protection** (`Lmml.Bundle`) -- Validates raw archive central directory tables via `:zip.table/1` up front, returning clean `{:error, {:unsafe_entry, name}}` error tuples.
+- **Comprehensive test coverage** -- Added test suites for `Lmml.Narrative.Segment`, `Lmml.Settings`, `LmmlTest`, new Mix tasks, end-to-end zip archive roundtrips, invalid UTF-8 parse handling, 4-kind aggregate validation reporting, and failure ordering.
+
 ## [0.1.0] - 2026-08-31
 
 Initial release.
