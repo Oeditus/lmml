@@ -92,7 +92,7 @@ defmodule Lmml.MixProject do
     [
       "README.md",
       "docs/THE_LMML_MANIFESTO.md": [title: "Why LMML?"],
-      "docs/RFC_LMML_FORMAT.md": [title: "RFC 0001 Specification"],
+      "docs/RFC_LMML_FORMAT.md": [title: "RFC Specification"],
       "docs/LANGUAGE_REFERENCE.md": [title: "Language Reference"],
       LICENSE: [title: "License"],
       "CHANGELOG.md": [title: "Changelog"]
