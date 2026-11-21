@@ -47,18 +47,33 @@ defmodule Lmml.Narrative.ResolverTest do
                Resolver.resolve(bundle)
     end
 
-    test "fails on the first embed that cannot be resolved, rather than dropping it silently" do
-      {:ok, bundle} = Bundle.new_text("foo", "See @missing.png please.")
+    test "rejects an invalid bundle with unresolvable embeds rather than dropping them silently" do
+      {:ok, bundle} = Bundle.new_text("foo", "See @missing.png please.", validate: false)
 
-      assert {:error, {"missing.png", {:unresolvable_reference, "missing.png"}}} =
+      assert {:error, {:invalid_bundle, [{:missing_reference, "missing.png"}]}} =
                Resolver.resolve(bundle)
     end
 
-    test "fails on the first unresolvable embed in narrative order when multiple are unresolvable" do
-      {:ok, bundle} = Bundle.new_text("foo", "First @missing1.png then @missing2.png")
+    test "reports all unresolvable embeds when multiple are missing" do
+      {:ok, bundle} =
+        Bundle.new_text("foo", "First @missing1.png then @missing2.png", validate: false)
 
-      assert {:error, {"missing1.png", {:unresolvable_reference, "missing1.png"}}} =
+      assert {:error,
+              {:invalid_bundle,
+               [{:missing_reference, "missing1.png"}, {:missing_reference, "missing2.png"}]}} =
                Resolver.resolve(bundle)
+    end
+
+    test "rejects a bundle with conflicting inline embeds" do
+      {:ok, bundle} =
+        Bundle.new_text("foo", "@@@a.txt\n1\n@@@\n\n@@@a.txt\n2\n@@@", validate: false)
+
+      assert {:error, {:invalid_bundle, [{:conflicting_embed, "a.txt"}]}} =
+               Resolver.resolve(bundle)
+    end
+
+    test "gracefully rejects non-bundle input" do
+      assert {:error, :invalid_input} = Resolver.resolve(nil)
     end
 
     test "a bundle with no embeds at all resolves to an empty embeds list" do
@@ -74,7 +89,7 @@ defmodule Lmml.Narrative.ResolverTest do
     end
 
     test "raises when an embed cannot be resolved" do
-      {:ok, bundle} = Bundle.new_text("foo", "@missing.png")
+      {:ok, bundle} = Bundle.new_text("foo", "@missing.png", validate: false)
 
       assert_raise RuntimeError, ~r/Failed to resolve lmml narrative/, fn ->
         Resolver.resolve!(bundle)

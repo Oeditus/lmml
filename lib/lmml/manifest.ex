@@ -45,6 +45,16 @@ defmodule Lmml.Manifest do
   """
   @spec load(Bundle.t()) :: {:ok, t() | nil} | {:error, term()}
   def load(%Bundle{} = bundle) do
+    with :ok <- Bundle.validate(bundle) do
+      load_raw(bundle)
+    end
+  end
+
+  def load(_invalid), do: {:error, :invalid_input}
+
+  @doc false
+  @spec load_raw(Bundle.t()) :: {:ok, t() | nil} | {:error, term()}
+  def load_raw(%Bundle{} = bundle) do
     case Bundle.embed(bundle, @manifest_name) do
       {:error, :not_found} -> {:ok, nil}
       {:error, reason} -> {:error, reason}

@@ -73,22 +73,58 @@ defmodule Lmml.SettingsTest do
     end
 
     test "errors cleanly when the reference is unresolvable in a bare text bundle" do
-      {:ok, bundle} = Bundle.new_text("foo", "See @settings.yaml please.")
-      assert {:error, {:unresolvable_reference, "settings.yaml"}} = Settings.load(bundle)
+      {:ok, bundle} = Bundle.new_text("foo", "See @settings.yaml please.", validate: false)
+      assert {:error, [{:missing_reference, "settings.yaml"}]} = Settings.load(bundle)
     end
   end
 
   describe "load/2 with malformed or unsupported settings content" do
     test "errors when a settings.yaml has an unsupported construct (a list item)" do
-      {:ok, bundle} = Bundle.new_text("foo", "@@@settings.yaml\ntools:\n  - read_files\n@@@")
+      {:ok, bundle} =
+        Bundle.new_text("foo", "@@@settings.yaml\ntools:\n  - read_files\n@@@", validate: false)
 
-      assert {:error, {:invalid_settings, {:unsupported_yaml, _line, _reason}}} =
+      assert {:error, [{:invalid_settings, {"settings.yaml", {:unsupported_yaml, _, _}}}]} =
                Settings.load(bundle)
     end
 
+    test "errors when a settings.yaml has duplicate keys, empty key, tab indent, or scalar+child" do
+      {:ok, dup} =
+        Bundle.new_text("foo", "@@@settings.yaml\na: 1\na: 2\n@@@", validate: false)
+
+      assert {:error, [{:invalid_settings, {"settings.yaml", {:unsupported_yaml, _, _}}}]} =
+               Settings.load(dup)
+
+      {:ok, empty_key} =
+        Bundle.new_text("foo", "@@@settings.yaml\n: value\n@@@", validate: false)
+
+      assert {:error, [{:invalid_settings, {"settings.yaml", {:unsupported_yaml, _, _}}}]} =
+               Settings.load(empty_key)
+
+      {:ok, tab} =
+        Bundle.new_text("foo", "@@@settings.yaml\nserver:\n\thost: a\n@@@", validate: false)
+
+      assert {:error, [{:invalid_settings, {"settings.yaml", {:unsupported_yaml, _, _}}}]} =
+               Settings.load(tab)
+
+      {:ok, both} =
+        Bundle.new_text("foo", "@@@settings.yaml\nserver: foo\n  host: a\n@@@", validate: false)
+
+      assert {:error, [{:invalid_settings, {"settings.yaml", {:unsupported_yaml, _, _}}}]} =
+               Settings.load(both)
+    end
+
+    test "handles single-character quote values without crashing" do
+      {:ok, bundle} = Bundle.new_text("foo", "@@@settings.yaml\nquote: \"\n@@@")
+      assert {:ok, settings} = Settings.load(bundle)
+      assert Settings.get(settings, "quote") == "\""
+    end
+
     test "errors when a settings.json is not valid JSON" do
-      {:ok, bundle} = Bundle.new_text("foo", "@@@settings.json\nnot json {{{\n@@@")
-      assert {:error, {:invalid_settings, _reason}} = Settings.load(bundle, "settings.json")
+      {:ok, bundle} =
+        Bundle.new_text("foo", "@@@settings.json\nnot json {{{\n@@@", validate: false)
+
+      assert {:error, [{:invalid_settings, {"settings.json", _reason}}]} =
+               Settings.load(bundle, "settings.json")
     end
 
     test "errors on an unrecognized settings extension" do
@@ -126,7 +162,7 @@ defmodule Lmml.SettingsTest do
     end
 
     test "raises when the settings embed is mentioned but unresolvable" do
-      {:ok, bundle} = Bundle.new_text("foo", "@settings.yaml")
+      {:ok, bundle} = Bundle.new_text("foo", "@settings.yaml", validate: false)
 
       assert_raise RuntimeError, ~r/Failed to load lmml settings/, fn ->
         Settings.load!(bundle)

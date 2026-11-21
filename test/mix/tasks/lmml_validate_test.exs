@@ -30,8 +30,11 @@ defmodule Mix.Tasks.Lmml.ValidateTest do
 
   test "raises and reports every issue for an invalid bundle", %{dir: dir} do
     path = Path.join(dir, "convo.lmmlz")
-    {:ok, bundle} = Lmml.Bundle.new_zip("convo", "@missing.png", %{"orphan.txt" => "x"})
-    Lmml.Bundle.write!(bundle, path)
+
+    {:ok, bundle} =
+      Lmml.Bundle.new_zip("convo", "@missing.png", %{"orphan.txt" => "x"}, validate: false)
+
+    Lmml.Bundle.write!(bundle, path, validate: false)
 
     assert_raise Mix.Error, ~r/2 issue\(s\) found/, fn ->
       Validate.run([path])

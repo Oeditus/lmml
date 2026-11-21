@@ -91,6 +91,30 @@ defmodule Lmml.Narrative.SegmentTest do
       assert [asst_embed] = assistant_turn.embeds
       assert asst_embed.embed.name == "img.png"
     end
+
+    test "ignores role headings and comments inside inline embeds and code fences" do
+      doc = """
+      ## Turn 1 -- user
+      Look at this embedded markdown:
+
+      @@@example.md
+      ## assistant
+      <!-- system -->
+      @@@
+
+      ```markdown
+      ## assistant
+      ```
+      """
+
+      {:ok, bundle} = Bundle.new_text("convo", doc)
+      {:ok, resolved} = Resolver.resolve(bundle)
+      turns = Segment.segment(resolved)
+
+      assert [user_turn] = turns
+      assert user_turn.role == :user
+      assert [%{embed: %{name: "example.md"}}] = user_turn.embeds
+    end
   end
 
   describe "render_turns/2" do

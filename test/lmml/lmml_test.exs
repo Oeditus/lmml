@@ -41,10 +41,17 @@ defmodule LmmlTest do
           %{"photo.png" => "png_data"}
         )
 
-      md = Lmml.to_md(bundle)
+      assert {:ok, md} = Lmml.to_md(bundle)
       assert md =~ "Check [Image: photo.png] and config:"
       assert md =~ "[Attachment: settings.yaml]"
       refute md =~ "@@@settings.yaml"
+    end
+
+    test "to_md rejects an invalid bundle rather than silently operating on it" do
+      {:ok, broken} = Lmml.new_zip("convo", "See @missing.png.", %{}, validate: false)
+
+      assert {:error, {:invalid_bundle, [{:missing_reference, "missing.png"}]}} =
+               Lmml.to_md(broken)
     end
 
     test "segment and render_turns delegate to Lmml.Narrative.Segment" do
@@ -91,7 +98,7 @@ defmodule LmmlTest do
       {:ok, bundle} = Lmml.new_zip("convo", "See @a.png.", %{"a.png" => "bytes"})
       assert :ok = Lmml.validate(bundle)
 
-      {:ok, broken} = Lmml.new_zip("convo", "See @missing.png.", %{})
+      {:ok, broken} = Lmml.new_zip("convo", "See @missing.png.", %{}, validate: false)
       assert {:error, issues} = Lmml.validate(broken)
       assert {:missing_reference, "missing.png"} in issues
     end

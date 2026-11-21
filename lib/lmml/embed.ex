@@ -21,10 +21,34 @@ defmodule Lmml.Embed do
   @enforce_keys [:name, :content]
   defstruct [:name, :content]
 
+  @segment_regex ~r/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/
+
   @typedoc "Where an embed's actual bytes live."
   @type content :: {:inline, binary()} | {:external, String.t()}
 
   @type t :: %__MODULE__{name: String.t(), content: content()}
+
+  @doc """
+  Returns `true` if `name` is a valid, path-safe embed identifier.
+
+  Every `/`-separated path segment must start with an ASCII alphanumeric
+  character and contain only `[a-zA-Z0-9_.-]`. Leading or trailing slashes,
+  backslashes, empty segments, `.`/`..` traversal segments, whitespace,
+  control characters, and non-UTF-8 binaries are all rejected.
+  """
+  @spec valid_name?(term()) :: boolean()
+  def valid_name?(name) when is_binary(name) and byte_size(name) > 0 do
+    String.valid?(name) and
+      not String.starts_with?(name, "/") and
+      not String.ends_with?(name, "/") and
+      not String.contains?(name, "\\") and
+      not String.contains?(name, <<0>>) and
+      name
+      |> String.split("/")
+      |> Enum.all?(&Regex.match?(@segment_regex, &1))
+  end
+
+  def valid_name?(_), do: false
 
   @doc "Builds an inline embed (content captured directly in the narrative)."
   @spec inline(String.t(), binary()) :: t()

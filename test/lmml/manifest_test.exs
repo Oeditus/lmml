@@ -46,29 +46,30 @@ defmodule Lmml.ManifestTest do
     end
 
     test "errors cleanly when the reference is unresolvable in a bare text bundle" do
-      {:ok, bundle} = Bundle.new_text("foo", "See @manifest.json please.")
+      {:ok, bundle} = Bundle.new_text("foo", "See @manifest.json please.", validate: false)
 
-      assert {:error, {:unresolvable_reference, "manifest.json"}} = Manifest.load(bundle)
+      assert {:error, [{:missing_reference, "manifest.json"}]} = Manifest.load(bundle)
     end
 
     test "errors cleanly when the zip entry it points to is missing" do
-      {:ok, bundle} = Bundle.new_zip("convo", "See @manifest.json please.", %{})
+      {:ok, bundle} = Bundle.new_zip("convo", "See @manifest.json please.", %{}, validate: false)
 
-      assert {:error, {:missing_entry, "manifest.json"}} = Manifest.load(bundle)
+      assert {:error, [{:missing_reference, "manifest.json"}]} = Manifest.load(bundle)
     end
   end
 
   describe "load/1 with malformed manifest content" do
     test "errors when the content is not valid JSON" do
-      {:ok, bundle} = Bundle.new_text("foo", "@@@manifest.json\nnot json at all {{{\n@@@")
+      {:ok, bundle} =
+        Bundle.new_text("foo", "@@@manifest.json\nnot json at all {{{\n@@@", validate: false)
 
-      assert {:error, {:invalid_manifest, _reason}} = Manifest.load(bundle)
+      assert {:error, [{:invalid_manifest, _reason}]} = Manifest.load(bundle)
     end
 
     test "errors when the content decodes to something other than a JSON object" do
-      {:ok, bundle} = Bundle.new_text("foo", "@@@manifest.json\n[1, 2, 3]\n@@@")
+      {:ok, bundle} = Bundle.new_text("foo", "@@@manifest.json\n[1, 2, 3]\n@@@", validate: false)
 
-      assert {:error, {:invalid_manifest, {:not_an_object, [1, 2, 3]}}} = Manifest.load(bundle)
+      assert {:error, [{:invalid_manifest, {:not_an_object, [1, 2, 3]}}]} = Manifest.load(bundle)
     end
   end
 
@@ -84,7 +85,7 @@ defmodule Lmml.ManifestTest do
     end
 
     test "raises when the manifest is mentioned but unresolvable" do
-      {:ok, bundle} = Bundle.new_text("foo", "@manifest.json")
+      {:ok, bundle} = Bundle.new_text("foo", "@manifest.json", validate: false)
 
       assert_raise RuntimeError, ~r/Failed to load lmml manifest/, fn ->
         Manifest.load!(bundle)

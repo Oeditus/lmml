@@ -85,8 +85,11 @@ defmodule Lmml.Pack do
   colliding on a single zip entry. Rename one side before packing.
   """
   @spec pack(Bundle.t(), String.t() | nil) :: {:ok, Bundle.t()} | {:error, term()}
-  def pack(%Bundle{} = bundle, name \\ nil) do
-    with :ok <- guard_name_collisions(bundle) do
+  def pack(bundle, name \\ nil)
+
+  def pack(%Bundle{} = bundle, name) when is_nil(name) or is_binary(name) do
+    with :ok <- validate_input(bundle),
+         :ok <- guard_name_collisions(bundle) do
       inline_embeds =
         bundle |> Bundle.embeds() |> Enum.filter(&Embed.inline?/1) |> Enum.uniq_by(& &1.name)
 
@@ -98,6 +101,8 @@ defmodule Lmml.Pack do
       Bundle.new_zip(name || Bundle.name(bundle), narrative, collect_entries(bundle))
     end
   end
+
+  def pack(_invalid, _name), do: {:error, :invalid_input}
 
   @doc "Same as `pack/2`, but raises on failure."
   @spec pack!(Bundle.t(), String.t() | nil) :: Bundle.t()
@@ -113,19 +118,27 @@ defmodule Lmml.Pack do
   block, returning a new `:text` bundle. `name` overrides the resulting
   bundle's logical name; defaults to `bundle`'s own name.
 
-  Unlike `pack/2`, every external reference must actually resolve --
-  there is no such thing as a partially-inlined result, since a `:text`
-  bundle has nowhere left to point a dangling reference at. A zip entry
-  that no embed in the narrative mentions at all (see
-  `Lmml.Bundle.validate/1`'s `{:orphaned_entry, ...}`) is necessarily
-  dropped, since it was never part of the document model to begin with
-  and a `:text` bundle cannot carry an unreferenced entry.
+  Validates both the input bundle and the resulting inlined bundle, rejecting
+  malformed input, unresolvable references, non-UTF-8 content, or content
+  containing `@@@` fence delimiters that would corrupt the resulting narrative.
   """
   @spec inline(Bundle.t(), String.t() | nil) :: {:ok, Bundle.t()} | {:error, term()}
-  def inline(%Bundle{} = bundle, name \\ nil) do
-    with {:ok, resolved} <- resolve_external(bundle) do
+  def inline(bundle, name \\ nil)
+
+  def inline(%Bundle{} = bundle, name) when is_nil(name) or is_binary(name) do
+    with :ok <- validate_input(bundle),
+         {:ok, resolved} <- resolve_external(bundle) do
       narrative = substitute_references(Bundle.narrative(bundle), bundle, resolved)
       Bundle.new_text(name || Bundle.name(bundle), narrative)
+    end
+  end
+
+  def inline(_invalid, _name), do: {:error, :invalid_input}
+
+  defp validate_input(bundle) do
+    case Bundle.validate(bundle) do
+      :ok -> :ok
+      {:error, issues} -> {:error, {:invalid_bundle, issues}}
     end
   end
 
@@ -221,7 +234,11 @@ defmodule Lmml.Pack do
   # ever happening; a binary asset should stay external, referenced by
   # `@name.ext`, which is exactly what `.lmmlz` archives are for.
   defp ensure_inlinable(content) do
-    if String.valid?(content), do: :ok, else: {:error, :not_utf8}
+    cond do
+      not String.valid?(content) -> {:error, :not_utf8}
+      String.contains?(content, "@@@") -> {:error, :contains_embed_delimiter}
+      true -> :ok
+    end
   end
 
   defp substitute_references(narrative, bundle, resolved) do

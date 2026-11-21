@@ -38,22 +38,23 @@ defmodule Lmml do
   alias Lmml.Pack
   alias Lmml.Settings
 
-  @doc "Opens a `.lmml`/`.lmmlz` entity from disk. Delegates to `Lmml.Bundle.open/1`."
-  @spec open(Path.t()) :: {:ok, Bundle.t()} | {:error, term()}
-  def open(path), do: Bundle.open(path)
+  @doc "Opens a `.lmml`/`.lmmlz` entity from disk. Delegates to `Lmml.Bundle.open/2`."
+  @spec open(Path.t(), keyword()) :: {:ok, Bundle.t()} | {:error, term()}
+  def open(path, opts \\ []), do: Bundle.open(path, opts)
 
-  @doc "Same as `open/1`, but raises on failure. Delegates to `Lmml.Bundle.open!/1`."
-  @spec open!(Path.t()) :: Bundle.t()
-  def open!(path), do: Bundle.open!(path)
+  @doc "Same as `open/2`, but raises on failure. Delegates to `Lmml.Bundle.open!/2`."
+  @spec open!(Path.t(), keyword()) :: Bundle.t()
+  def open!(path, opts \\ []), do: Bundle.open!(path, opts)
 
-  @doc "Builds a bare-text bundle from narrative text. Delegates to `Lmml.Bundle.new_text/2`."
-  @spec new_text(String.t(), binary()) :: {:ok, Bundle.t()} | {:error, term()}
-  def new_text(name, narrative), do: Bundle.new_text(name, narrative)
+  @doc "Builds a bare-text bundle from narrative text. Delegates to `Lmml.Bundle.new_text/3`."
+  @spec new_text(String.t(), binary(), keyword()) :: {:ok, Bundle.t()} | {:error, term()}
+  def new_text(name, narrative, opts \\ []), do: Bundle.new_text(name, narrative, opts)
 
-  @doc "Builds a zip-backed bundle from narrative text plus external entries. Delegates to `Lmml.Bundle.new_zip/3`."
-  @spec new_zip(String.t(), binary(), %{optional(String.t()) => binary()}) ::
+  @doc "Builds a zip-backed bundle from narrative text plus external entries. Delegates to `Lmml.Bundle.new_zip/4`."
+  @spec new_zip(String.t(), binary(), %{optional(String.t()) => binary()}, keyword()) ::
           {:ok, Bundle.t()} | {:error, term()}
-  def new_zip(name, narrative, entries \\ %{}), do: Bundle.new_zip(name, narrative, entries)
+  def new_zip(name, narrative, entries \\ %{}, opts \\ []),
+    do: Bundle.new_zip(name, narrative, entries, opts)
 
   @doc "Resolves every embed a bundle's narrative mentions. Delegates to `Lmml.Narrative.Resolver.resolve/1`."
   @spec resolve(Bundle.t()) :: {:ok, Resolver.t()} | {:error, term()}
@@ -68,8 +69,12 @@ defmodule Lmml do
   def render(resolved, opts \\ []), do: Renderer.render(resolved, opts)
 
   @doc "Exports a narrative or bundle to standard Markdown with text placeholders. Delegates to `Lmml.Narrative.Renderer.to_md/2`."
-  @spec to_md(Resolver.t() | Bundle.t(), keyword()) :: String.t()
+  @spec to_md(Resolver.t() | Bundle.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def to_md(target, opts \\ []), do: Renderer.to_md(target, opts)
+
+  @doc "Same as `to_md/2`, but raises on failure. Delegates to `Lmml.Narrative.Renderer.to_md!/2`."
+  @spec to_md!(Resolver.t() | Bundle.t(), keyword()) :: String.t()
+  def to_md!(target, opts \\ []), do: Renderer.to_md!(target, opts)
 
   @doc "Cross-checks a bundle's narrative against its own entries. Delegates to `Lmml.Bundle.validate/1`."
   @spec validate(Bundle.t()) :: :ok | {:error, [Bundle.validation_issue()]}

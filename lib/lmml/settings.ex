@@ -65,7 +65,15 @@ defmodule Lmml.Settings do
       decoded (`{:invalid_settings, reason}`).
   """
   @spec load(Bundle.t(), String.t()) :: {:ok, t() | nil} | {:error, term()}
-  def load(%Bundle{} = bundle, name \\ @settings_name) do
+  def load(%Bundle{} = bundle, name \\ @settings_name) when is_binary(name) do
+    with :ok <- Bundle.validate(bundle) do
+      load_raw(bundle, name)
+    end
+  end
+
+  @doc false
+  @spec load_raw(Bundle.t(), String.t()) :: {:ok, t() | nil} | {:error, term()}
+  def load_raw(%Bundle{} = bundle, name \\ @settings_name) when is_binary(name) do
     case Bundle.embed(bundle, name) do
       {:error, :not_found} -> {:ok, nil}
       {:error, reason} -> {:error, reason}
@@ -184,22 +192,43 @@ defmodule Lmml.Settings do
     defp parse_siblings([], _indent, acc), do: {:ok, acc, []}
 
     defp parse_siblings([line | rest] = lines, indent, acc) do
-      case indent_of(line) do
-        ^indent ->
-          case parse_entry(line, rest, indent) do
-            {:ok, key, value, remaining} ->
-              parse_siblings(remaining, indent, Map.put(acc, key, value))
+      with :ok <- ensure_no_tab_indent(line) do
+        dispatch_sibling(indent_of(line), indent, line, rest, lines, acc)
+      end
+    end
 
-            {:error, _reason} = error ->
-              error
-          end
+    defp dispatch_sibling(indent, indent, line, rest, _lines, acc) do
+      with {:ok, key, value, remaining} <- parse_entry(line, rest, indent),
+           :ok <- ensure_unique_key(acc, key, line) do
+        parse_siblings(remaining, indent, Map.put(acc, key, value))
+      end
+    end
 
-        less when less < indent ->
-          # Reached an outer level; hand the whole remaining run back up.
-          {:ok, acc, lines}
+    defp dispatch_sibling(less, indent, _line, _rest, lines, acc) when less < indent do
+      # Reached an outer level; hand the whole remaining run back up.
+      {:ok, acc, lines}
+    end
 
-        _more ->
-          {:error, {:unsupported_yaml, line, "unexpected indentation"}}
+    defp dispatch_sibling(_more, _indent, line, _rest, _lines, _acc) do
+      {:error, {:unsupported_yaml, line, "unexpected indentation"}}
+    end
+
+    defp ensure_unique_key(acc, key, line) do
+      if Map.has_key?(acc, key) do
+        {:error, {:unsupported_yaml, line, "duplicate key: #{key}"}}
+      else
+        :ok
+      end
+    end
+
+    defp ensure_no_tab_indent(line) do
+      trimmed = String.trim_leading(line)
+      prefix = binary_part(line, 0, byte_size(line) - byte_size(trimmed))
+
+      if String.contains?(prefix, "\t") do
+        {:error, {:unsupported_yaml, line, "tabs are not allowed for indentation"}}
+      else
+        :ok
       end
     end
 
@@ -210,18 +239,21 @@ defmodule Lmml.Settings do
     defp parse_entry(line, rest, indent) do
       case split_key_value(line) do
         {:error, _reason} = error -> error
-        {key, raw_value} -> parse_value_or_child(key, raw_value, rest, indent)
+        {key, raw_value} -> parse_value_or_child(line, key, raw_value, rest, indent)
       end
     end
 
-    defp parse_value_or_child(key, raw_value, rest, indent) do
+    defp parse_value_or_child(line, key, raw_value, rest, indent) do
       case child_indent(rest, indent) do
         nil ->
           {:ok, key, decode_scalar(raw_value), rest}
 
-        child_indent ->
+        child_indent when raw_value == "" ->
           {child_lines, remaining} = collect_child_lines(rest, indent)
           parse_child_map(key, child_lines, child_indent, remaining)
+
+        _child_indent ->
+          {:error, {:unsupported_yaml, line, "cannot have both scalar value and nested mapping"}}
       end
     end
 
@@ -266,8 +298,17 @@ defmodule Lmml.Settings do
       stripped = String.trim(line)
 
       case :binary.split(stripped, ":") do
-        [key, value] -> {String.trim(key), String.trim(value)}
-        _ -> {:error, {:unsupported_yaml, line, "expected 'key: value'"}}
+        [key, value] ->
+          trimmed_key = String.trim(key)
+
+          if trimmed_key == "" do
+            {:error, {:unsupported_yaml, line, "empty key"}}
+          else
+            {trimmed_key, String.trim(value)}
+          end
+
+        _ ->
+          {:error, {:unsupported_yaml, line, "expected 'key: value'"}}
       end
     end
 
@@ -283,12 +324,14 @@ defmodule Lmml.Settings do
       end
     end
 
-    defp quoted_string?(value) do
+    defp quoted_string?(value) when byte_size(value) >= 2 do
       (String.starts_with?(value, "\"") and String.ends_with?(value, "\"")) or
         (String.starts_with?(value, "'") and String.ends_with?(value, "'"))
     end
 
-    defp unwrap_quotes(value), do: String.slice(value, 1, byte_size(value) - 2)
+    defp quoted_string?(_value), do: false
+
+    defp unwrap_quotes(value), do: binary_part(value, 1, byte_size(value) - 2)
 
     defp decode_number(value) do
       case Integer.parse(value) do

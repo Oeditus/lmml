@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Lmml.ToMd do
         e -> Mix.raise("Failed to open #{source}: #{Exception.message(e)}")
       end
 
-    md_content = Lmml.to_md(bundle)
+    md_content = Lmml.to_md!(bundle)
 
     dest |> Path.dirname() |> File.mkdir_p!()
     File.write!(dest, md_content)

@@ -11,24 +11,39 @@ defmodule Lmml.BundleTest do
   end
 
   describe "opening a bare .lmml text file" do
-    test "open/1 parses the narrative and exposes no entries", %{dir: dir} do
+    test "open/1 parses a valid narrative with inline embeds and exposes no entries", %{dir: dir} do
       path = Path.join(dir, "foo.lmml")
-      File.write!(path, "Hello @image.png here.")
+      File.write!(path, "Hello.\n\n@@@notes.txt\nworld\n@@@")
 
       assert {:ok, bundle} = Bundle.open(path)
       assert Bundle.text?(bundle)
       refute Bundle.zip?(bundle)
-      assert Bundle.narrative(bundle) == "Hello @image.png here."
+      assert Bundle.narrative(bundle) == "Hello.\n\n@@@notes.txt\nworld\n@@@"
       assert Bundle.entries(bundle) == []
-      assert [%Lmml.Embed{name: "image.png"}] = Bundle.embeds(bundle)
+      assert [%Lmml.Embed{name: "notes.txt"}] = Bundle.embeds(bundle)
     end
 
-    test "an external reference is unresolvable in a text-only bundle", %{dir: dir} do
+    test "open/1 rejects a bare .lmml text file containing an external reference", %{dir: dir} do
       path = Path.join(dir, "foo.lmml")
       File.write!(path, "Hello @image.png here.")
 
-      {:ok, bundle} = Bundle.open(path)
+      assert {:error, {:invalid_bundle, [{:missing_reference, "image.png"}]}} = Bundle.open(path)
+    end
+
+    test "an external reference is unresolvable in a text-only bundle opened with validate: false",
+         %{dir: dir} do
+      path = Path.join(dir, "foo.lmml")
+      File.write!(path, "Hello @image.png here.")
+
+      {:ok, bundle} = Bundle.open(path, validate: false)
       assert {:error, {:unresolvable_reference, "image.png"}} = Bundle.embed(bundle, "image.png")
+    end
+
+    test "open/1 rejects a bare text file masquerading as .lmmlz", %{dir: dir} do
+      path = Path.join(dir, "fake.lmmlz")
+      File.write!(path, "Just plain text, not a zip.")
+
+      assert {:error, {:invalid_zip, :not_a_zip_archive}} = Bundle.open(path)
     end
 
     test "an inline embed resolves regardless of bundle kind", %{dir: dir} do
@@ -109,11 +124,22 @@ defmodule Lmml.BundleTest do
 
   describe "write!/2 round-trips" do
     test "a text bundle writes its narrative back out verbatim", %{dir: dir} do
-      {:ok, bundle} = Bundle.new_text("foo", "Hello @a.png.")
+      {:ok, bundle} = Bundle.new_text("foo", "Hello.\n\n@@@a.txt\nhi\n@@@")
       path = Path.join(dir, "foo.lmml")
 
       assert :ok = Bundle.write!(bundle, path)
-      assert File.read!(path) == "Hello @a.png."
+      assert File.read!(path) == "Hello.\n\n@@@a.txt\nhi\n@@@"
+    end
+
+    test "write!/2 refuses to persist an invalid bundle", %{dir: dir} do
+      {:ok, broken} = Bundle.new_text("foo", "Hello @a.png.", validate: false)
+      path = Path.join(dir, "foo.lmml")
+
+      assert_raise RuntimeError, ~r/Refusing to write invalid lmml bundle/, fn ->
+        Bundle.write!(broken, path)
+      end
+
+      refute File.exists?(path)
     end
 
     test "a zip bundle round-trips through write! and open, re-deriving the entry name from the target path",
@@ -141,34 +167,50 @@ defmodule Lmml.BundleTest do
     end
 
     test "flags an external reference with no matching zip entry" do
-      {:ok, bundle} = Bundle.new_zip("convo", "See @missing.png.", %{})
+      assert {:error, {:invalid_bundle, issues}} =
+               Bundle.new_zip("convo", "See @missing.png.", %{})
+
+      assert {:missing_reference, "missing.png"} in issues
+
+      {:ok, bundle} = Bundle.new_zip("convo", "See @missing.png.", %{}, validate: false)
       assert {:error, issues} = Bundle.validate(bundle)
       assert {:missing_reference, "missing.png"} in issues
     end
 
     test "flags every external reference as missing in a bare text bundle, since it has no entries at all" do
-      {:ok, bundle} = Bundle.new_text("foo", "See @image.png.")
+      assert {:error, {:invalid_bundle, issues}} = Bundle.new_text("foo", "See @image.png.")
+      assert {:missing_reference, "image.png"} in issues
 
+      {:ok, bundle} = Bundle.new_text("foo", "See @image.png.", validate: false)
       assert {:error, issues} = Bundle.validate(bundle)
       assert {:missing_reference, "image.png"} in issues
     end
 
     test "flags a zip entry that nothing in the narrative references" do
-      {:ok, bundle} = Bundle.new_zip("convo", "No references here.", %{"orphan.png" => "bytes"})
+      assert {:error, {:invalid_bundle, issues}} =
+               Bundle.new_zip("convo", "No references here.", %{"orphan.png" => "bytes"})
+
+      assert {:orphaned_entry, "orphan.png"} in issues
+
+      {:ok, bundle} =
+        Bundle.new_zip("convo", "No references here.", %{"orphan.png" => "bytes"},
+          validate: false
+        )
 
       assert {:error, issues} = Bundle.validate(bundle)
       assert {:orphaned_entry, "orphan.png"} in issues
     end
 
     test "flags an embed name that could not safely become a zip entry name" do
-      {:ok, bundle} = Bundle.new_text("foo", "See @../secret.txt please.")
+      {:ok, bundle} = Bundle.new_text("foo", "See @../secret.txt please.", validate: false)
 
       assert {:error, issues} = Bundle.validate(bundle)
       assert {:malformed_embed_name, "../secret.txt"} in issues
     end
 
     test "flags two inline embeds that share a name but disagree on content" do
-      {:ok, bundle} = Bundle.new_text("foo", "@@@a.txt\nhello\n@@@\n\n@@@a.txt\nworld\n@@@")
+      {:ok, bundle} =
+        Bundle.new_text("foo", "@@@a.txt\nhello\n@@@\n\n@@@a.txt\nworld\n@@@", validate: false)
 
       assert {:error, issues} = Bundle.validate(bundle)
       assert {:conflicting_embed, "a.txt"} in issues
@@ -180,9 +222,28 @@ defmodule Lmml.BundleTest do
       assert :ok = Bundle.validate(bundle)
     end
 
+    test "flags an embed colliding with the bundle's own narrative entry name" do
+      assert {:error, {:invalid_bundle, issues}} =
+               Bundle.new_text("convo", "@@@convo.lmml\nboom\n@@@")
+
+      assert {:reserved_narrative_entry, "convo.lmml"} in issues
+    end
+
+    test "flags malformed manifest.json and settings.yaml reserved embeds" do
+      assert {:error, {:invalid_bundle, issues}} =
+               Bundle.new_text("convo", "@@@manifest.json\n{bad json\n@@@")
+
+      assert Enum.any?(issues, &match?({:invalid_manifest, _}, &1))
+
+      assert {:error, {:invalid_bundle, issues}} =
+               Bundle.new_text("convo", "@@@settings.yaml\ntools:\n  - a\n@@@")
+
+      assert Enum.any?(issues, &match?({:invalid_settings, {"settings.yaml", _}}, &1))
+    end
+
     test "reports every issue at once, not just the first" do
       {:ok, bundle} =
-        Bundle.new_zip("convo", "See @missing.png.", %{"orphan.png" => "bytes"})
+        Bundle.new_zip("convo", "See @missing.png.", %{"orphan.png" => "bytes"}, validate: false)
 
       assert {:error, issues} = Bundle.validate(bundle)
       assert {:missing_reference, "missing.png"} in issues
@@ -194,7 +255,8 @@ defmodule Lmml.BundleTest do
         Bundle.new_zip(
           "convo",
           "See @missing.png and @../secret.txt.\n\n@@@a.txt\n1\n@@@\n\n@@@a.txt\n2\n@@@",
-          %{"orphan.png" => "bytes"}
+          %{"orphan.png" => "bytes"},
+          validate: false
         )
 
       assert {:error, issues} = Bundle.validate(bundle)
@@ -205,6 +267,13 @@ defmodule Lmml.BundleTest do
 
       kinds = issues |> Enum.map(&elem(&1, 0)) |> MapSet.new()
       assert MapSet.size(kinds) == 4
+    end
+
+    test "gracefully rejects non-binary/invalid inputs to open/new_text/new_zip" do
+      assert {:error, :invalid_input} = Bundle.open(nil)
+      assert {:error, :invalid_input} = Bundle.new_text(123, "hello")
+      assert {:error, :invalid_input} = Bundle.new_zip("convo", "hello", %{"a.txt" => 123})
+      assert {:error, {:malformed_bundle_name, ""}} = Bundle.new_text("", "hello")
     end
   end
 

@@ -192,16 +192,77 @@ defmodule Lmml.Narrative.Segment do
   # Scans the narrative line by line (tracking byte offsets) and returns the
   # role delimiters in order: `[{role, line_start, line_end}]` where
   # `line_end` is just past the delimiter's own trailing newline.
+  # Lines inside `@@@...@@@` inline embeds or Markdown code fences (``` / ~~~)
+  # are skipped so embedded headings or comments never split a turn.
   defp find_delimiters(narrative) do
     narrative
     |> lines_with_offsets()
-    |> Enum.flat_map(fn {line, start, after_newline} ->
-      case role_of_line(line) do
-        nil -> []
-        role -> [{role, start, after_newline}]
-      end
-    end)
+    |> Enum.reduce({:prose, []}, &scan_delimiter_line/2)
+    |> elem(1)
+    |> Enum.reverse()
   end
+
+  defp scan_delimiter_line({raw_line, start, after_newline}, {:prose, acc}) do
+    line = String.trim_trailing(raw_line, "\r")
+
+    cond do
+      match?({:code_fence, _, _}, opening_code_fence(line)) ->
+        {opening_code_fence(line), acc}
+
+      String.starts_with?(line, "@@@") and not String.starts_with?(line, "@@@@") ->
+        {:embed_fence, acc}
+
+      true ->
+        case role_of_line(line) do
+          nil -> {:prose, acc}
+          role -> {:prose, [{role, start, after_newline} | acc]}
+        end
+    end
+  end
+
+  defp scan_delimiter_line({raw_line, _start, _after_newline}, {:embed_fence, acc}) do
+    line = String.trim_trailing(raw_line, "\r")
+
+    if String.ends_with?(line, "@@@") and not String.ends_with?(line, "@@@@") do
+      {:prose, acc}
+    else
+      {:embed_fence, acc}
+    end
+  end
+
+  defp scan_delimiter_line({raw_line, _start, _after_newline}, {{:code_fence, char, len}, acc}) do
+    line = raw_line |> String.trim_trailing("\r") |> String.trim()
+
+    if closing_code_fence?(line, char, len) do
+      {:prose, acc}
+    else
+      {{:code_fence, char, len}, acc}
+    end
+  end
+
+  defp opening_code_fence(line) do
+    trimmed = String.trim_leading(line)
+
+    cond do
+      String.starts_with?(trimmed, "```") ->
+        {:code_fence, "`", leading_run_length(trimmed, ?`)}
+
+      String.starts_with?(trimmed, "~~~") ->
+        {:code_fence, "~", leading_run_length(trimmed, ?~)}
+
+      true ->
+        nil
+    end
+  end
+
+  defp closing_code_fence?(trimmed, char, min_len) do
+    byte = :binary.first(char)
+    run = leading_run_length(trimmed, byte)
+    run >= min_len and run == byte_size(trimmed)
+  end
+
+  defp leading_run_length(<<c, rest::binary>>, c), do: 1 + leading_run_length(rest, c)
+  defp leading_run_length(_other, _c), do: 0
 
   # Yields `{line_content_without_newline, byte_start, byte_after_newline}`
   # for each line of `text`.

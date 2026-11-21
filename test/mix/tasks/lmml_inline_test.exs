@@ -34,8 +34,8 @@ defmodule Mix.Tasks.Lmml.InlineTest do
 
   test "fails when an external reference cannot be resolved", %{dir: dir} do
     source = Path.join(dir, "broken.lmmlz")
-    {:ok, bundle} = Lmml.Bundle.new_zip("broken", "@missing.png", %{})
-    Lmml.Bundle.write!(bundle, source)
+    {:ok, bundle} = Lmml.Bundle.new_zip("broken", "@missing.png", %{}, validate: false)
+    Lmml.Bundle.write!(bundle, source, validate: false)
 
     assert_raise Mix.Error, ~r/Failed to inline/, fn ->
       Inline.run([source])

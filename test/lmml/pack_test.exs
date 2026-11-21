@@ -40,12 +40,11 @@ defmodule Lmml.PackTest do
       assert {:ok, "x: 1\n"} = Bundle.embed(packed, "b.yaml")
     end
 
-    test "a dangling reference in the source is left dangling in the result" do
-      {:ok, bundle} = Bundle.new_text("foo", "See @missing.png please.")
+    test "rejects a bundle containing a dangling reference rather than propagating it" do
+      {:ok, bundle} = Bundle.new_text("foo", "See @missing.png please.", validate: false)
 
-      {:ok, packed} = Pack.pack(bundle)
-      assert Bundle.entries(packed) == []
-      assert {:error, {:missing_entry, "missing.png"}} = Bundle.embed(packed, "missing.png")
+      assert {:error, {:invalid_bundle, [{:missing_reference, "missing.png"}]}} =
+               Pack.pack(bundle)
     end
 
     test "defaults the resulting bundle's name to the source bundle's own name" do
@@ -61,22 +60,23 @@ defmodule Lmml.PackTest do
     end
 
     test "an embed name that cannot safely become a zip entry name is rejected" do
-      {:ok, bundle} = Bundle.new_text("foo", "@@@../evil.txt\nx\n@@@")
-      assert {:error, {:unsafe_entry, "../evil.txt"}} = Pack.pack(bundle)
+      {:ok, bundle} = Bundle.new_text("foo", "@@@../evil.txt\nx\n@@@", validate: false)
+
+      assert {:error, {:invalid_bundle, [{:malformed_embed_name, "../evil.txt"}]}} =
+               Pack.pack(bundle)
     end
 
     test "fails when the same name is both inline and an external reference, rather than silently dropping one side" do
-      # `a.txt` is an inline embed AND an external reference into the zip's
-      # own entry -- externalizing the inline copy would leave two `@a.txt`
-      # references meaning different things, colliding on one entry.
       {:ok, bundle} =
         Bundle.new_zip(
           "convo",
           "@a.txt then:\n\n@@@a.txt\ninline copy\n@@@",
-          %{"a.txt" => "external bytes"}
+          %{"a.txt" => "external bytes"},
+          validate: false
         )
 
-      assert {:error, {:conflicting_embed, "a.txt"}} = Pack.pack(bundle)
+      assert {:error, {:invalid_bundle, issues}} = Pack.pack(bundle)
+      assert {:conflicting_embed, "a.txt"} in issues
     end
 
     test "does not flag an inline embed whose name merely resembles, but does not equal, an external reference" do
@@ -96,10 +96,12 @@ defmodule Lmml.PackTest do
         Bundle.new_zip(
           "convo",
           "No references, just inline:\n\n@@@a.txt\ninline content\n@@@",
-          %{"a.txt" => "existing entry content"}
+          %{"a.txt" => "existing entry content"},
+          validate: false
         )
 
-      assert {:error, {:conflicting_embed, "a.txt"}} = Pack.pack(bundle)
+      assert {:error, {:invalid_bundle, issues}} = Pack.pack(bundle)
+      assert {:conflicting_embed, "a.txt"} in issues
     end
 
     test "multiple distinct inline embeds are all externalized" do
@@ -118,7 +120,7 @@ defmodule Lmml.PackTest do
     end
 
     test "raises on failure" do
-      {:ok, bundle} = Bundle.new_text("foo", "@@@../evil.txt\nx\n@@@")
+      {:ok, bundle} = Bundle.new_text("foo", "@@@../evil.txt\nx\n@@@", validate: false)
 
       assert_raise RuntimeError, ~r/Failed to pack lmml bundle/, fn ->
         Pack.pack!(bundle)
@@ -173,17 +175,27 @@ defmodule Lmml.PackTest do
       assert Bundle.narrative(inlined) == "@@@a.txt\nhello\n@@@"
     end
 
-    test "drops a zip entry that nothing in the narrative references" do
-      {:ok, bundle} = Bundle.new_zip("convo", "No references here.", %{"orphan.png" => "bytes"})
+    test "rejects a zip bundle containing an orphaned entry rather than silently dropping it" do
+      {:ok, bundle} =
+        Bundle.new_zip("convo", "No references here.", %{"orphan.png" => "bytes"},
+          validate: false
+        )
 
-      {:ok, inlined} = Pack.inline(bundle)
-      assert Bundle.narrative(inlined) == "No references here."
-      assert Bundle.embeds(inlined) == []
+      assert {:error, {:invalid_bundle, [{:orphaned_entry, "orphan.png"}]}} = Pack.inline(bundle)
     end
 
     test "fails when an external reference cannot be resolved, rather than partially inlining" do
-      {:ok, bundle} = Bundle.new_zip("convo", "See @missing.png please.", %{})
-      assert {:error, {"missing.png", {:missing_entry, "missing.png"}}} = Pack.inline(bundle)
+      {:ok, bundle} = Bundle.new_zip("convo", "See @missing.png please.", %{}, validate: false)
+
+      assert {:error, {:invalid_bundle, [{:missing_reference, "missing.png"}]}} =
+               Pack.inline(bundle)
+    end
+
+    test "rejects inlining content that contains the @@@ embed delimiter" do
+      {:ok, bundle} =
+        Bundle.new_zip("convo", "See @notes.txt here.", %{"notes.txt" => "line1\n@@@\nline2"})
+
+      assert {:error, {"notes.txt", :contains_embed_delimiter}} = Pack.inline(bundle)
     end
 
     test "does not confuse a shorter reference name with a longer, unrelated one" do
@@ -244,7 +256,7 @@ defmodule Lmml.PackTest do
     end
 
     test "raises on failure" do
-      {:ok, bundle} = Bundle.new_zip("convo", "@missing.png", %{})
+      {:ok, bundle} = Bundle.new_zip("convo", "@missing.png", %{}, validate: false)
 
       assert_raise RuntimeError, ~r/Failed to inline lmml bundle/, fn ->
         Pack.inline!(bundle)

@@ -26,29 +26,39 @@ defmodule Lmml.Document do
   reference and `@@@name.ext ... @@@` inline embed found anywhere in the
   resulting AST.
 
-  Never fails on malformed/unexpected input in the way a strict grammar
-  might: `lmml` is a superset of Markdown, so anything `Md.Parser.Default`
-  itself can parse, this parses too (see `Lmml.Narrative.Parser`).
+  Validates that the input is valid UTF-8, that all `@@@` inline embed fences
+  are balanced and well-formed, that the parser consumes the entire input with
+  no malformed `:lmml_embed` or `:lmml_ref` AST nodes, and (unless
+  `validate: false` is passed) that every embed name satisfies
+  `Lmml.Embed.valid_name?/1`.
 
   The `@@@name ... @@@` block is declared with `escape: false` in
   `Lmml.Narrative.Syntax` (`Md` >= 0.12.2), so an `:lmml_embed` node's
   content already matches the literal bytes written between the fences
   verbatim -- no post-processing needed here.
   """
-  @spec parse(binary()) :: {:ok, t()} | {:error, term()}
-  def parse(narrative) when is_binary(narrative) do
-    {"", state} = Parser.parse(narrative)
-    {:ok, %__MODULE__{ast: state.ast, embeds: collect_embeds(state.ast)}}
-  rescue
-    e -> {:error, Exception.message(e)}
+  @spec parse(binary(), keyword()) :: {:ok, t()} | {:error, term()}
+  def parse(narrative, opts \\ [])
+
+  def parse(narrative, opts) when is_binary(narrative) and is_list(opts) do
+    validate_names? = Keyword.get(opts, :validate, true)
+
+    with :ok <- ensure_utf8(narrative),
+         :ok <- validate_fences(narrative),
+         {:ok, ast} <- run_parser(narrative),
+         {:ok, embeds} <- collect_embeds(ast, validate_names?) do
+      {:ok, %__MODULE__{ast: ast, embeds: embeds}}
+    end
   end
 
-  @doc "Same as `parse/1`, but raises on failure."
-  @spec parse!(binary()) :: t()
-  def parse!(narrative) do
-    case parse(narrative) do
+  def parse(_non_binary, _opts), do: {:error, :invalid_input}
+
+  @doc "Same as `parse/2`, but raises on failure."
+  @spec parse!(binary(), keyword()) :: t()
+  def parse!(narrative, opts \\ []) do
+    case parse(narrative, opts) do
       {:ok, document} -> document
-      {:error, reason} -> raise "Failed to parse lmml narrative: #{reason}"
+      {:error, reason} -> raise "Failed to parse lmml narrative: #{inspect(reason)}"
     end
   end
 
@@ -84,28 +94,162 @@ defmodule Lmml.Document do
   def inline_embeds(%__MODULE__{embeds: embeds}), do: Enum.filter(embeds, &Embed.inline?/1)
 
   # ---------------------------------------------------------------------
+  # Parsing & structural validation
+  # ---------------------------------------------------------------------
+
+  defp ensure_utf8(narrative) do
+    if String.valid?(narrative), do: :ok, else: {:error, :invalid_utf8}
+  end
+
+  defp run_parser(narrative) do
+    case Parser.parse(narrative) do
+      {"", state} -> {:ok, state.ast}
+      {rest, _state} -> {:error, {:unparsed_input, rest}}
+    end
+  rescue
+    e -> {:error, {:parse_error, Exception.message(e)}}
+  end
+
+  # Scans lines to ensure every `@@@` inline embed fence outside standard
+  # Markdown code fences (``` / ~~~) is properly opened with a name and closed.
+  defp validate_fences(narrative) do
+    narrative
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.reduce_while(:prose, &check_fence_line/2)
+    |> case do
+      :prose -> :ok
+      {:code_fence, _char, _len} -> :ok
+      {:embed_fence, name, line_num} -> {:error, {:unclosed_embed, name, line_num}}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp check_fence_line({raw_line, line_num}, :prose) do
+    line = String.trim_trailing(raw_line, "\r")
+
+    cond do
+      match?({:code_fence, _, _}, opening_code_fence(line)) ->
+        {:cont, opening_code_fence(line)}
+
+      String.starts_with?(line, "@@@@") ->
+        {:halt, {:error, {:malformed_embed_fence, line_num, :invalid_delimiter}}}
+
+      String.starts_with?(line, "@@@") ->
+        name = String.trim_leading(binary_part(line, 3, byte_size(line) - 3))
+
+        if name == "" do
+          {:halt, {:error, {:malformed_embed_fence, line_num, :missing_name}}}
+        else
+          {:cont, {:embed_fence, name, line_num}}
+        end
+
+      true ->
+        {:cont, :prose}
+    end
+  end
+
+  defp check_fence_line({raw_line, _line_num}, {:code_fence, char, len} = state) do
+    line = raw_line |> String.trim_trailing("\r") |> String.trim()
+
+    if closing_code_fence?(line, char, len) do
+      {:cont, :prose}
+    else
+      {:cont, state}
+    end
+  end
+
+  defp check_fence_line({raw_line, _line_num}, {:embed_fence, _name, _start_line} = state) do
+    line = String.trim_trailing(raw_line, "\r")
+
+    if String.ends_with?(line, "@@@") and not String.ends_with?(line, "@@@@") do
+      {:cont, :prose}
+    else
+      {:cont, state}
+    end
+  end
+
+  defp opening_code_fence(line) do
+    trimmed = String.trim_leading(line)
+
+    cond do
+      String.starts_with?(trimmed, "```") ->
+        {:code_fence, "`", leading_run_length(trimmed, ?`)}
+
+      String.starts_with?(trimmed, "~~~") ->
+        {:code_fence, "~", leading_run_length(trimmed, ?~)}
+
+      true ->
+        nil
+    end
+  end
+
+  defp closing_code_fence?(trimmed, char, min_len) do
+    byte = :binary.first(char)
+    run = leading_run_length(trimmed, byte)
+    run >= min_len and run == byte_size(trimmed)
+  end
+
+  defp leading_run_length(<<c, rest::binary>>, c), do: 1 + leading_run_length(rest, c)
+  defp leading_run_length(_other, _c), do: 0
+
+  # ---------------------------------------------------------------------
   # AST walking
   # ---------------------------------------------------------------------
 
-  @spec collect_embeds(ast() | Md.Listener.branch() | term()) :: [Embed.t()]
-  defp collect_embeds(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &collect_embeds/1)
-
-  defp collect_embeds({:lmml_ref, %{name: name}, []}) when is_binary(name) do
-    [Embed.external(name)]
+  @spec collect_embeds(ast(), boolean()) :: {:ok, [Embed.t()]} | {:error, term()}
+  defp collect_embeds(nodes, validate_names?) do
+    case do_collect_embeds(nodes, validate_names?, []) do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      {:error, _reason} = error -> error
+    end
   end
 
-  defp collect_embeds({:lmml_embed, %{name: name}, [content]})
+  defp do_collect_embeds([], _validate_names?, acc), do: {:ok, acc}
+
+  defp do_collect_embeds([node | rest], validate_names?, acc) do
+    with {:ok, acc} <- collect_node(node, validate_names?, acc) do
+      do_collect_embeds(rest, validate_names?, acc)
+    end
+  end
+
+  defp collect_node({:lmml_ref, %{name: name}, []}, validate_names?, acc) when is_binary(name) do
+    if not validate_names? or Embed.valid_name?(name) do
+      {:ok, [Embed.external(name) | acc]}
+    else
+      {:error, {:malformed_embed_name, name}}
+    end
+  end
+
+  defp collect_node({:lmml_ref, attrs, _children}, _validate_names?, _acc) do
+    {:error, {:malformed_embed, attrs}}
+  end
+
+  defp collect_node({:lmml_embed, %{name: name}, [content]}, validate_names?, acc)
        when is_binary(name) and is_binary(content) do
-    [Embed.inline(name, content)]
+    if not validate_names? or Embed.valid_name?(name) do
+      {:ok, [Embed.inline(name, content) | acc]}
+    else
+      {:error, {:malformed_embed_name, name}}
+    end
   end
 
-  defp collect_embeds({:lmml_embed, %{name: name}, []}) when is_binary(name) do
-    [Embed.inline(name, "")]
+  defp collect_node({:lmml_embed, %{name: name}, []}, validate_names?, acc)
+       when is_binary(name) do
+    if not validate_names? or Embed.valid_name?(name) do
+      {:ok, [Embed.inline(name, "") | acc]}
+    else
+      {:error, {:malformed_embed_name, name}}
+    end
   end
 
-  defp collect_embeds({_tag, _attrs, children}) when is_list(children) do
-    collect_embeds(children)
+  defp collect_node({:lmml_embed, attrs, _children}, _validate_names?, _acc) do
+    {:error, {:malformed_embed, attrs}}
   end
 
-  defp collect_embeds(_leaf_or_unrecognized), do: []
+  defp collect_node({_tag, _attrs, children}, validate_names?, acc) when is_list(children) do
+    do_collect_embeds(children, validate_names?, acc)
+  end
+
+  defp collect_node(_leaf_or_unrecognized, _validate_names?, acc), do: {:ok, acc}
 end

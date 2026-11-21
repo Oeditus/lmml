@@ -24,23 +24,19 @@ defmodule Mix.Tasks.Lmml.Validate do
   end
 
   defp do_validate(source) do
-    bundle =
-      try do
-        Lmml.Bundle.open!(source)
-      rescue
-        e -> Mix.raise("Failed to open #{source}: #{Exception.message(e)}")
-      end
-
-    case Lmml.Bundle.validate(bundle) do
-      :ok ->
+    case Lmml.Bundle.open(source) do
+      {:ok, _bundle} ->
         Mix.shell().info("#{source}: OK")
 
-      {:error, issues} ->
+      {:error, {:invalid_bundle, issues}} ->
         Enum.each(issues, fn issue ->
           Mix.shell().error("#{source}: " <> format_issue(issue))
         end)
 
         Mix.raise("#{source}: #{length(issues)} issue(s) found")
+
+      {:error, reason} ->
+        Mix.raise("Failed to open #{source}: #{inspect(reason)}")
     end
   end
 
@@ -48,4 +44,16 @@ defmodule Mix.Tasks.Lmml.Validate do
   defp format_issue({:orphaned_entry, name}), do: "orphaned zip entry: #{name}"
   defp format_issue({:malformed_embed_name, name}), do: "malformed embed name: #{name}"
   defp format_issue({:conflicting_embed, name}), do: "conflicting embed: #{name}"
+
+  defp format_issue({:reserved_narrative_entry, name}),
+    do: "embed collides with narrative entry: #{name}"
+
+  defp format_issue({:invalid_narrative, reason}),
+    do: "invalid narrative: #{inspect(reason)}"
+
+  defp format_issue({:invalid_manifest, reason}),
+    do: "invalid manifest.json: #{inspect(reason)}"
+
+  defp format_issue({:invalid_settings, {name, reason}}),
+    do: "invalid settings (#{name}): #{inspect(reason)}"
 end

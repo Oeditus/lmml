@@ -63,7 +63,50 @@ defmodule Lmml.DocumentTest do
 
     test "returns an error tuple for invalid UTF-8 input rather than raising" do
       invalid_utf8 = <<0xFF, 0xFE, 0xFD>>
-      assert {:error, _reason} = Document.parse(invalid_utf8)
+      assert {:error, :invalid_utf8} = Document.parse(invalid_utf8)
+    end
+
+    test "returns an error tuple for non-binary input" do
+      assert {:error, :invalid_input} = Document.parse(nil)
+      assert {:error, :invalid_input} = Document.parse(123)
+    end
+
+    test "rejects an unclosed @@@ inline embed fence" do
+      assert {:error, {:unclosed_embed, "settings.yaml", 1}} =
+               Document.parse("@@@settings.yaml\nkey: value\n")
+    end
+
+    test "rejects a nameless or stray @@@ fence" do
+      assert {:error, {:malformed_embed_fence, 1, :missing_name}} =
+               Document.parse("@@@\ncontent\n@@@")
+
+      assert {:error, {:malformed_embed_fence, 3, :missing_name}} =
+               Document.parse("Hello\n\n@@@\n\nWorld")
+    end
+
+    test "rejects a 4+ @ fence delimiter" do
+      assert {:error, {:malformed_embed_fence, 1, :invalid_delimiter}} =
+               Document.parse("@@@@foo.txt\nhi\n@@@@")
+    end
+
+    test "ignores @@@ fences inside standard Markdown code blocks" do
+      doc = "```markdown\n@@@example.txt\nnot a real embed\n```"
+      assert {:ok, document} = Document.parse(doc)
+      assert document.embeds == []
+    end
+
+    test "rejects malformed embed names (traversal, whitespace, leading dot, bare @)" do
+      assert {:error, {:malformed_embed_name, "../secret.txt"}} =
+               Document.parse("See @../secret.txt here.")
+
+      assert {:error, {:malformed_embed_name, "foo bar.txt"}} =
+               Document.parse("@@@foo bar.txt\nhi\n@@@")
+
+      assert {:error, {:malformed_embed_name, ".hidden.txt"}} =
+               Document.parse("See @.hidden.txt here.")
+
+      assert {:error, {:malformed_embed_name, " world"}} =
+               Document.parse("Hello @ world")
     end
   end
 

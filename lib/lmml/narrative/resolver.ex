@@ -34,8 +34,18 @@ defmodule Lmml.Narrative.Resolver do
   """
   @spec resolve(Bundle.t()) :: {:ok, t()} | {:error, term()}
   def resolve(%Bundle{} = bundle) do
-    with {:ok, resolved} <- resolve_embeds(bundle) do
+    with :ok <- validate_bundle(bundle),
+         {:ok, resolved} <- resolve_embeds(bundle) do
       {:ok, %__MODULE__{narrative: Bundle.narrative(bundle), embeds: resolved}}
+    end
+  end
+
+  def resolve(_invalid), do: {:error, :invalid_input}
+
+  defp validate_bundle(bundle) do
+    case Bundle.validate(bundle) do
+      :ok -> :ok
+      {:error, issues} -> {:error, {:invalid_bundle, issues}}
     end
   end
 

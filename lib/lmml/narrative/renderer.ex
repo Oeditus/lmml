@@ -148,26 +148,40 @@ defmodule Lmml.Narrative.Renderer do
   def image?(name), do: String.starts_with?(mime_type(name), "image/")
 
   @doc """
-  Exports a narrative to standard, human-readable Markdown by replacing
-  embed syntax (`@name.ext` and `@@@name.ext ... @@@`) with clean text
-  placeholders (e.g. `[Image: logo.png]` or `[Attachment: config.yaml]`).
+  Exports a validated narrative or bundle to standard, human-readable Markdown
+  by replacing embed syntax (`@name.ext` and `@@@name.ext ... @@@`) with clean
+  text placeholders (e.g. `[Image: logo.png]` or `[Attachment: config.yaml]`).
+
+  Returns `{:ok, markdown}` on valid input, or `{:error, reason}` if the
+  bundle fails validation or resolution.
   """
-  @spec to_md(Resolver.t() | Lmml.Bundle.t(), keyword()) :: String.t()
+  @spec to_md(Resolver.t() | Lmml.Bundle.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def to_md(target, opts \\ [])
 
-  def to_md(%Resolver{narrative: narrative, embeds: resolved}, _opts) do
-    text_without_fences = Enum.reduce(resolved, narrative, &replace_inline_fence/2)
-    Enum.reduce(resolved, text_without_fences, &replace_external_sigil/2)
+  def to_md(%Resolver{narrative: narrative, embeds: resolved}, _opts)
+      when is_binary(narrative) and is_list(resolved) do
+    if String.valid?(narrative) do
+      text_without_fences = Enum.reduce(resolved, narrative, &replace_inline_fence/2)
+      {:ok, Enum.reduce(resolved, text_without_fences, &replace_external_sigil/2)}
+    else
+      {:error, :invalid_utf8}
+    end
   end
 
   def to_md(%Lmml.Bundle{} = bundle, opts) do
-    case Resolver.resolve(bundle) do
-      {:ok, resolved} ->
-        to_md(resolved, opts)
+    with {:ok, resolved} <- Resolver.resolve(bundle) do
+      to_md(resolved, opts)
+    end
+  end
 
-      {:error, _} ->
-        narrative = Lmml.Bundle.narrative(bundle)
-        Enum.reduce(Lmml.Bundle.embeds(bundle), narrative, &convert_unresolved_embed/2)
+  def to_md(_invalid, _opts), do: {:error, :invalid_input}
+
+  @doc "Same as `to_md/2`, but raises on failure."
+  @spec to_md!(Resolver.t() | Lmml.Bundle.t(), keyword()) :: String.t()
+  def to_md!(target, opts \\ []) do
+    case to_md(target, opts) do
+      {:ok, md} -> md
+      {:error, reason} -> raise "Failed to export lmml to Markdown: #{inspect(reason)}"
     end
   end
 
@@ -187,16 +201,6 @@ defmodule Lmml.Narrative.Renderer do
       Regex.replace(pattern, acc, placeholder_for(name))
     else
       acc
-    end
-  end
-
-  defp convert_unresolved_embed(embed, acc) do
-    if Embed.inline?(embed) do
-      fence = "@@@" <> embed.name <> "\n" <> Embed.content(embed) <> "@@@"
-      String.replace(acc, fence, placeholder_for(embed.name))
-    else
-      pattern = ~r/@#{Regex.escape(embed.name)}(?!\w)/u
-      Regex.replace(pattern, acc, placeholder_for(embed.name))
     end
   end
 
